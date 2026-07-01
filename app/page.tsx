@@ -161,7 +161,7 @@ export default function KanbanPage() {
     persistirSetoresVisiveis(novo);
   }
 
-  const totalOps = opsFiltradas.length;
+  const totalOps = new Set(opsFiltradas.map((op) => op.op_numero)).size;
   const totalPecas = opsFiltradas.reduce((acc, op) => acc + (op.quantidade || 0), 0);
 
   return (
@@ -314,7 +314,7 @@ export default function KanbanPage() {
                       <div style={{ ...estilos.capacidadeBox, borderColor: corOcup }}>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                           <span style={{ ...estilos.capacidadePercent, color: corOcup }}>
-                            {ocupacao.toFixed(0)}% da capacidade
+                            {ocupacao.toFixed(0)}% de ocupação
                           </span>
                           {ocupacao >= 100 && <span style={{ fontSize: 12 }}>⚠️</span>}
                         </div>

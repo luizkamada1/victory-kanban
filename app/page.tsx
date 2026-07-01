@@ -48,6 +48,10 @@ function normaliza(texto: string): string {
     .replace(/[̀-ͯ]/g, "");
 }
 
+function abreviaOficina(nome: string): string {
+  return nome.replace(/^OFICINA EXTERNA\s+/i, "O.E. ");
+}
+
 export default function KanbanPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,6 +64,7 @@ export default function KanbanPage() {
   const [busca, setBusca] = useState("");
   const [capacidadeSetores, setCapacidadeSetores] = useState<Record<string, number>>({});
   const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
+  const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -123,7 +128,9 @@ export default function KanbanPage() {
       (op) =>
         normaliza(op.op_numero).includes(buscaNormalizada) ||
         normaliza(op.codigo || "").includes(buscaNormalizada) ||
-        normaliza(op.produto || "").includes(buscaNormalizada)
+        normaliza(op.produto || "").includes(buscaNormalizada) ||
+        normaliza(op.oficina || "").includes(buscaNormalizada) ||
+        normaliza(abreviaOficina(op.oficina || "")).includes(buscaNormalizada)
     );
   }, [ops, buscaNormalizada]);
 
@@ -191,7 +198,7 @@ export default function KanbanPage() {
               type="text"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar por OP, código ou produto..."
+              placeholder="Buscar por OP, código, produto ou oficina..."
               style={estilos.buscaInput}
             />
             {busca && (
@@ -326,36 +333,46 @@ export default function KanbanPage() {
                       </div>
                     )}
                     {breakdownOficinas.length > 0 && (
-                      <div style={estilos.oficinasBreakdown}>
-                        {breakdownOficinas.map(
-                          ({ oficina, totalOficina, capOficina, ocupOficina, diasOficina }) => {
-                            const corOf = corOcupacao(ocupOficina);
-                            return (
-                              <div key={oficina} style={estilos.oficinaLinha}>
-                                <div style={estilos.oficinaLinhaTopo}>
-                                  <span style={estilos.oficinaNome} title={oficina}>
-                                    {oficina}
-                                  </span>
-                                  <span style={{ color: corOf, fontWeight: 700 }}>
-                                    {ocupOficina !== null ? `${ocupOficina.toFixed(0)}%` : "s/ capacidade"}
-                                  </span>
-                                </div>
-                                <div style={estilos.oficinaLinhaBaixo}>
-                                  <span>
-                                    {totalOficina.toLocaleString("pt-BR")}
-                                    {capOficina > 0 ? ` / ${capOficina.toLocaleString("pt-BR")}` : ""} pç
-                                  </span>
-                                  {diasOficina !== null && (
-                                    <span>
-                                      ≈ {diasOficina.toFixed(1)} dia{diasOficina >= 2 ? "s" : ""}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          }
+                      <>
+                        <button
+                          onClick={() => setOficinasVisiveis((v) => !v)}
+                          style={estilos.oficinasToggle}
+                        >
+                          {oficinasVisiveis ? "▾" : "▸"} Oficinas ({breakdownOficinas.length})
+                        </button>
+                        {oficinasVisiveis && (
+                          <div style={estilos.oficinasBreakdown}>
+                            {breakdownOficinas.map(
+                              ({ oficina, totalOficina, capOficina, ocupOficina, diasOficina }) => {
+                                const corOf = corOcupacao(ocupOficina);
+                                return (
+                                  <div key={oficina} style={estilos.oficinaLinha}>
+                                    <div style={estilos.oficinaLinhaTopo}>
+                                      <span style={estilos.oficinaNome} title={oficina}>
+                                        {abreviaOficina(oficina)}
+                                      </span>
+                                      <span style={{ color: corOf, fontWeight: 700 }}>
+                                        {ocupOficina !== null ? `${ocupOficina.toFixed(0)}%` : "s/ capacidade"}
+                                      </span>
+                                    </div>
+                                    <div style={estilos.oficinaLinhaBaixo}>
+                                      <span>
+                                        {totalOficina.toLocaleString("pt-BR")}
+                                        {capOficina > 0 ? ` / ${capOficina.toLocaleString("pt-BR")}` : ""} pç
+                                      </span>
+                                      {diasOficina !== null && (
+                                        <span>
+                                          ≈ {diasOficina.toFixed(1)} dia{diasOficina >= 2 ? "s" : ""}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }
+                            )}
+                          </div>
                         )}
-                      </div>
+                      </>
                     )}
                   </div>
                   <div style={estilos.colunaCorpo}>
@@ -378,7 +395,7 @@ export default function KanbanPage() {
                             <div style={estilos.cardProduto}>{op.produto}</div>
                             {mostrarOficina && op.oficina && (
                               <div style={estilos.cardOficina}>
-                                Oficina: <strong>{op.oficina}</strong>
+                                Oficina: <strong>{abreviaOficina(op.oficina)}</strong>
                               </div>
                             )}
                             {dias !== null && (
@@ -554,6 +571,7 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     maxHeight: "calc(100vh - 170px)",
+    overflow: "hidden",
   },
   colunaHeader: {
     padding: "12px 12px 10px",
@@ -610,12 +628,25 @@ const estilos: Record<string, React.CSSProperties> = {
     color: "#6b7280",
     fontWeight: 500,
   },
+  oficinasToggle: {
+    marginTop: 8,
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    fontSize: 11.5,
+    fontWeight: 700,
+    color: "#4b5563",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+  },
   oficinasBreakdown: {
     marginTop: 8,
     display: "flex",
     flexDirection: "column",
     gap: 5,
-    maxHeight: 150,
+    maxHeight: 420,
     overflowY: "auto",
   },
   oficinaLinha: {
@@ -650,6 +681,8 @@ const estilos: Record<string, React.CSSProperties> = {
     gap: 8,
     padding: 10,
     overflowY: "auto",
+    flex: 1,
+    minHeight: 0,
   },
   colunaVazia: {
     textAlign: "center",

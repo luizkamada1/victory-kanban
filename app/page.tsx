@@ -84,7 +84,8 @@ export default function KanbanPage() {
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
   const [setorReordenando, setSetorReordenando] = useState<string | null>(null);
   const [arrastandoChave, setArrastandoChave] = useState<string | null>(null);
-  const [sobreChave, setSobreChave] = useState<string | null>(null);
+  const [setorArrastando, setSetorArrastando] = useState<string | null>(null);
+  const [indiceAlvoDrop, setIndiceAlvoDrop] = useState<number | null>(null);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -172,15 +173,15 @@ export default function KanbanPage() {
     persistirOrdem(setor, nova.map(filaKey));
   }
 
-  function arrastarPara(setor: string, cardsAtuais: OP[], chaveOrigem: string, chaveDestino: string) {
-    if (chaveOrigem === chaveDestino) return;
-    const chaves = cardsAtuais.map(filaKey);
-    const indiceOrigem = chaves.indexOf(chaveOrigem);
-    const indiceDestino = chaves.indexOf(chaveDestino);
-    if (indiceOrigem === -1 || indiceDestino === -1) return;
-    const nova = [...cardsAtuais];
-    const [removido] = nova.splice(indiceOrigem, 1);
-    nova.splice(indiceDestino, 0, removido);
+  // posicaoNaListaSemArrastado: posição de inserção já considerando a lista SEM o card
+  // arrastado (é assim que o placeholder visual é calculado durante o arraste).
+  function arrastarParaPosicao(setor: string, cardsAtuais: OP[], chaveOrigem: string, posicaoNaListaSemArrastado: number) {
+    const indiceOrigem = cardsAtuais.findIndex((op) => filaKey(op) === chaveOrigem);
+    if (indiceOrigem === -1) return;
+    const semArrastado = cardsAtuais.filter((op) => filaKey(op) !== chaveOrigem);
+    const alvo = Math.max(0, Math.min(posicaoNaListaSemArrastado, semArrastado.length));
+    const nova = [...semArrastado];
+    nova.splice(alvo, 0, cardsAtuais[indiceOrigem]);
     persistirOrdem(setor, nova.map(filaKey));
   }
 
@@ -464,14 +465,53 @@ export default function KanbanPage() {
                       </>
                     )}
                   </div>
-                  <div style={estilos.colunaCorpo}>
+                  <div
+                    style={estilos.colunaCorpo}
+                    onDragOver={(e) => {
+                      if (setorArrastando !== setor) return;
+                      e.preventDefault();
+                      if (e.target === e.currentTarget) {
+                        const semArrastado = cards.filter((op) => filaKey(op) !== arrastandoChave);
+                        setIndiceAlvoDrop(semArrastado.length);
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (setorArrastando !== setor) return;
+                      e.preventDefault();
+                      if (arrastandoChave && indiceAlvoDrop !== null) {
+                        arrastarParaPosicao(setor, cards, arrastandoChave, indiceAlvoDrop);
+                      }
+                      setArrastandoChave(null);
+                      setSetorArrastando(null);
+                      setIndiceAlvoDrop(null);
+                    }}
+                  >
                     {cards.length === 0 ? (
                       <div style={estilos.colunaVazia}>Sem OPs</div>
                     ) : (
                       (() => {
                         let acumuladoColuna = 0;
                         const acumuladoPorOficina: Record<string, number> = {};
-                        return cards.map((op, indice) => {
+                        const emReordenacao = setorReordenando === setor;
+                        const arrastandoNesteSetor = emReordenacao && setorArrastando === setor;
+                        const nos: React.ReactNode[] = [];
+                        let posSemArrastado = 0;
+
+                        cards.forEach((op, indice) => {
+                          const chave = filaKey(op);
+                          const éODragged = arrastandoNesteSetor && chave === arrastandoChave;
+                          if (éODragged) return;
+
+                          if (arrastandoNesteSetor && indiceAlvoDrop === posSemArrastado) {
+                            nos.push(
+                              <div key="placeholder" style={estilos.cardPlaceholder}>
+                                Soltar aqui
+                              </div>
+                            );
+                          }
+
+                          posSemArrastado++;
+
                           const dias = diasNoSetor(op.data_envio_fase);
                           const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
                           const cor = corAlerta(dias);
@@ -491,42 +531,35 @@ export default function KanbanPage() {
                             previsao = addDias(new Date(), diasPrevisao);
                           }
 
-                          const emReordenacao = setorReordenando === setor;
-                          const chave = filaKey(op);
-                          return (
+                          const posicaoCard = posSemArrastado - 1;
+
+                          nos.push(
                             <div
                               key={op.id}
                               draggable={emReordenacao}
                               onDragStart={(e) => {
                                 setArrastandoChave(chave);
+                                setSetorArrastando(setor);
+                                setIndiceAlvoDrop(posicaoCard);
                                 e.dataTransfer.effectAllowed = "move";
                               }}
                               onDragOver={(e) => {
-                                if (!emReordenacao || !arrastandoChave) return;
+                                if (!arrastandoNesteSetor) return;
                                 e.preventDefault();
-                                if (sobreChave !== chave) setSobreChave(chave);
-                              }}
-                              onDragLeave={() => {
-                                if (sobreChave === chave) setSobreChave(null);
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                if (arrastandoChave) arrastarPara(setor, cards, arrastandoChave, chave);
-                                setArrastandoChave(null);
-                                setSobreChave(null);
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                const antes = e.clientY < rect.top + rect.height / 2;
+                                const novoAlvo = antes ? posicaoCard : posicaoCard + 1;
+                                if (indiceAlvoDrop !== novoAlvo) setIndiceAlvoDrop(novoAlvo);
                               }}
                               onDragEnd={() => {
                                 setArrastandoChave(null);
-                                setSobreChave(null);
+                                setSetorArrastando(null);
+                                setIndiceAlvoDrop(null);
                               }}
                               style={{
                                 ...estilos.card,
                                 borderLeftColor: cor,
                                 ...(emReordenacao ? estilos.cardArrastavel : {}),
-                                ...(arrastandoChave === chave ? estilos.cardArrastando : {}),
-                                ...(sobreChave === chave && arrastandoChave !== chave
-                                  ? estilos.cardAlvoDrop
-                                  : {}),
                               }}
                             >
                               {emReordenacao && (
@@ -585,6 +618,16 @@ export default function KanbanPage() {
                             </div>
                           );
                         });
+
+                        if (arrastandoNesteSetor && indiceAlvoDrop === posSemArrastado) {
+                          nos.push(
+                            <div key="placeholder-fim" style={estilos.cardPlaceholder}>
+                              Soltar aqui
+                            </div>
+                          );
+                        }
+
+                        return nos;
                       })()
                     )}
                   </div>
@@ -933,8 +976,17 @@ const estilos: Record<string, React.CSSProperties> = {
   cardArrastando: {
     opacity: 0.4,
   },
-  cardAlvoDrop: {
-    boxShadow: "0 0 0 2px #6366f1, 0 1px 3px rgba(0,0,0,0.08)",
+  cardPlaceholder: {
+    border: "2px dashed #a5b4fc",
+    background: "#eef2ff",
+    borderRadius: 8,
+    minHeight: 56,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#6366f1",
   },
   cardAlca: {
     color: "#9ca3af",

@@ -52,6 +52,22 @@ function abreviaOficina(nome: string): string {
   return nome.replace(/^OFICINA EXTERNA\s+/i, "O.E. ");
 }
 
+// Identifica um card de forma estável entre uploads (a tabela producao_ops é
+// substituída a cada envio de planilha, então não dá pra usar o "id" do banco).
+function filaKey(op: OP): string {
+  return `${op.op_numero}::${op.oficina ?? ""}`;
+}
+
+function addDias(data: Date, dias: number): Date {
+  const resultado = new Date(data);
+  resultado.setDate(resultado.getDate() + dias);
+  return resultado;
+}
+
+function formataPrevisao(data: Date): string {
+  return data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
 export default function KanbanPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,6 +81,8 @@ export default function KanbanPage() {
   const [capacidadeSetores, setCapacidadeSetores] = useState<Record<string, number>>({});
   const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
+  const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
+  const [setorReordenando, setSetorReordenando] = useState<string | null>(null);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -110,15 +128,44 @@ export default function KanbanPage() {
     }
   }, []);
 
+  const carregarFila = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/fila", { cache: "no-store" });
+      const data = await resp.json();
+      if (!resp.ok) return;
+      setFilaOrdem(data.filas || {});
+    } catch {
+      // ordem manual é informativa; falha aqui não deve travar o kanban
+    }
+  }, []);
+
   useEffect(() => {
     carregarDados();
     carregarCapacidade();
+    carregarFila();
     const interval = setInterval(() => {
       carregarDados();
       carregarCapacidade();
+      carregarFila();
     }, REFRESH_MS);
     return () => clearInterval(interval);
-  }, [carregarDados, carregarCapacidade]);
+  }, [carregarDados, carregarCapacidade, carregarFila]);
+
+  function moverCard(setor: string, cardsAtuais: OP[], indice: number, direcao: -1 | 1) {
+    const destino = indice + direcao;
+    if (destino < 0 || destino >= cardsAtuais.length) return;
+    const nova = [...cardsAtuais];
+    [nova[indice], nova[destino]] = [nova[destino], nova[indice]];
+    const novaOrdem = nova.map(filaKey);
+    setFilaOrdem((atual) => ({ ...atual, [setor]: novaOrdem }));
+    fetch("/api/fila", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setor, ordem: novaOrdem }),
+    }).catch(() => {
+      // se falhar, a próxima carregarFila() volta pro estado salvo no banco
+    });
+  }
 
   const buscaNormalizada = normaliza(busca.trim());
 
@@ -260,9 +307,20 @@ export default function KanbanPage() {
         ) : (
           <div style={estilos.quadro}>
             {colunasParaExibir.map((setor) => {
-              const cards = (opsPorSetor.get(setor) || []).sort(
-                (a, b) => (b.quantidade || 0) - (a.quantidade || 0)
-              );
+              const cardsBase = opsPorSetor.get(setor) || [];
+              const ordemSalva = filaOrdem[setor];
+              let cards: OP[];
+              if (ordemSalva && ordemSalva.length > 0) {
+                const posicao = new Map(ordemSalva.map((chave, idx) => [chave, idx]));
+                cards = [...cardsBase].sort((a, b) => {
+                  const pa = posicao.has(filaKey(a)) ? posicao.get(filaKey(a))! : Infinity;
+                  const pb = posicao.has(filaKey(b)) ? posicao.get(filaKey(b))! : Infinity;
+                  if (pa !== pb) return pa - pb;
+                  return (b.quantidade || 0) - (a.quantidade || 0);
+                });
+              } else {
+                cards = [...cardsBase].sort((a, b) => (b.quantidade || 0) - (a.quantidade || 0));
+              }
               const totalPecasSetor = cards.reduce((acc, op) => acc + (op.quantidade || 0), 0);
 
               let capacidadeSetor: number | null = null;
@@ -309,6 +367,20 @@ export default function KanbanPage() {
                       <span style={estilos.colunaBadge}>
                         {totalPecasSetor.toLocaleString("pt-BR")} pç
                       </span>
+                      {cards.length > 1 && (
+                        <button
+                          onClick={() =>
+                            setSetorReordenando((atual) => (atual === setor ? null : setor))
+                          }
+                          style={{
+                            ...estilos.colunaBadge,
+                            ...estilos.colunaBadgeBotao,
+                            ...(setorReordenando === setor ? estilos.colunaBadgeBotaoAtivo : {}),
+                          }}
+                        >
+                          {setorReordenando === setor ? "✓ Ordenando" : "⇅ Ordenar"}
+                        </button>
+                      )}
                     </div>
                     {ocupacao !== null && (
                       <div style={{ ...estilos.capacidadeBox, borderColor: corOcup }}>
@@ -379,33 +451,85 @@ export default function KanbanPage() {
                     {cards.length === 0 ? (
                       <div style={estilos.colunaVazia}>Sem OPs</div>
                     ) : (
-                      cards.map((op) => {
-                        const dias = diasNoSetor(op.data_envio_fase);
-                        const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
-                        const cor = corAlerta(dias);
-                        return (
-                          <div key={op.id} style={{ ...estilos.card, borderLeftColor: cor }}>
-                            <div style={estilos.cardTopo}>
-                              <span style={estilos.cardOp}>OP {op.op_numero}</span>
-                              <span style={estilos.cardQtde}>
-                                {op.quantidade.toLocaleString("pt-BR")} pç
-                              </span>
+                      (() => {
+                        let acumuladoColuna = 0;
+                        const acumuladoPorOficina: Record<string, number> = {};
+                        return cards.map((op, indice) => {
+                          const dias = diasNoSetor(op.data_envio_fase);
+                          const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
+                          const cor = corAlerta(dias);
+
+                          let previsao: Date | null = null;
+                          if (setor === "COSTURA EXTERNA" && op.oficina) {
+                            const capOf = capacidadeOficinas[op.oficina] ?? 0;
+                            acumuladoPorOficina[op.oficina] =
+                              (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
+                            if (capOf > 0) {
+                              const diasPrevisao = Math.ceil(acumuladoPorOficina[op.oficina] / capOf);
+                              previsao = addDias(new Date(), diasPrevisao);
+                            }
+                          } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
+                            acumuladoColuna += op.quantidade || 0;
+                            const diasPrevisao = Math.ceil(acumuladoColuna / capacidadeSetor);
+                            previsao = addDias(new Date(), diasPrevisao);
+                          }
+
+                          return (
+                            <div key={op.id} style={{ ...estilos.card, borderLeftColor: cor }}>
+                              {setorReordenando === setor && (
+                                <div style={estilos.cardReordenar}>
+                                  <button
+                                    onClick={() => moverCard(setor, cards, indice, -1)}
+                                    disabled={indice === 0}
+                                    style={{
+                                      ...estilos.cardSeta,
+                                      ...(indice === 0 ? estilos.cardSetaDesabilitada : {}),
+                                    }}
+                                  >
+                                    ▲
+                                  </button>
+                                  <span style={estilos.cardPosicao}>#{indice + 1}</span>
+                                  <button
+                                    onClick={() => moverCard(setor, cards, indice, 1)}
+                                    disabled={indice === cards.length - 1}
+                                    style={{
+                                      ...estilos.cardSeta,
+                                      ...(indice === cards.length - 1 ? estilos.cardSetaDesabilitada : {}),
+                                    }}
+                                  >
+                                    ▼
+                                  </button>
+                                </div>
+                              )}
+                              <div style={estilos.cardTopo}>
+                                <span style={estilos.cardOp}>OP {op.op_numero}</span>
+                                <span style={estilos.cardQtde}>
+                                  {op.quantidade.toLocaleString("pt-BR")} pç
+                                </span>
+                              </div>
+                              <div style={estilos.cardCodigo}>{op.codigo}</div>
+                              <div style={estilos.cardProduto}>{op.produto}</div>
+                              {mostrarOficina && op.oficina && (
+                                <div style={estilos.cardOficina}>
+                                  Oficina: <strong>{abreviaOficina(op.oficina)}</strong>
+                                </div>
+                              )}
+                              <div style={estilos.cardRodape}>
+                                {dias !== null && (
+                                  <span style={{ ...estilos.cardDias, color: cor, background: cor + "1a" }}>
+                                    {dias === 0 ? "Entrou hoje" : `${dias} dia${dias > 1 ? "s" : ""} no setor`}
+                                  </span>
+                                )}
+                                {previsao && (
+                                  <span style={estilos.cardPrevisao} title="Previsão de conclusão nesse setor">
+                                    🏁 {formataPrevisao(previsao)}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                            <div style={estilos.cardCodigo}>{op.codigo}</div>
-                            <div style={estilos.cardProduto}>{op.produto}</div>
-                            {mostrarOficina && op.oficina && (
-                              <div style={estilos.cardOficina}>
-                                Oficina: <strong>{abreviaOficina(op.oficina)}</strong>
-                              </div>
-                            )}
-                            {dias !== null && (
-                              <div style={{ ...estilos.cardDias, color: cor, background: cor + "1a" }}>
-                                {dias === 0 ? "Entrou hoje" : `${dias} dia${dias > 1 ? "s" : ""} no setor`}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })
+                          );
+                        });
+                      })()
                     )}
                   </div>
                 </div>
@@ -724,11 +848,66 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 12,
   },
   cardDias: {
-    marginTop: 8,
     fontSize: 11,
     fontWeight: 700,
     padding: "3px 8px",
     borderRadius: 999,
     display: "inline-block",
+  },
+  cardRodape: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  cardPrevisao: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "3px 8px",
+    borderRadius: 999,
+    display: "inline-block",
+    background: "#eef2ff",
+    color: "#4338ca",
+  },
+  cardReordenar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 8,
+    paddingBottom: 8,
+    borderBottom: "1px dashed #e5e7eb",
+  },
+  cardSeta: {
+    background: "#f3f4f6",
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    width: 26,
+    height: 22,
+    fontSize: 11,
+    cursor: "pointer",
+    color: "#374151",
+  },
+  cardSetaDesabilitada: {
+    opacity: 0.3,
+    cursor: "not-allowed",
+  },
+  cardPosicao: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#6366f1",
+    minWidth: 24,
+    textAlign: "center",
+  },
+  colunaBadgeBotao: {
+    cursor: "pointer",
+    border: "1px solid #c7d2fe",
+    color: "#4338ca",
+  },
+  colunaBadgeBotaoAtivo: {
+    background: "#6366f1",
+    color: "#fff",
+    borderColor: "#6366f1",
   },
 };

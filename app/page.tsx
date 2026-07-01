@@ -83,6 +83,8 @@ export default function KanbanPage() {
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
   const [setorReordenando, setSetorReordenando] = useState<string | null>(null);
+  const [arrastandoChave, setArrastandoChave] = useState<string | null>(null);
+  const [sobreChave, setSobreChave] = useState<string | null>(null);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -151,12 +153,7 @@ export default function KanbanPage() {
     return () => clearInterval(interval);
   }, [carregarDados, carregarCapacidade, carregarFila]);
 
-  function moverCard(setor: string, cardsAtuais: OP[], indice: number, direcao: -1 | 1) {
-    const destino = indice + direcao;
-    if (destino < 0 || destino >= cardsAtuais.length) return;
-    const nova = [...cardsAtuais];
-    [nova[indice], nova[destino]] = [nova[destino], nova[indice]];
-    const novaOrdem = nova.map(filaKey);
+  function persistirOrdem(setor: string, novaOrdem: string[]) {
     setFilaOrdem((atual) => ({ ...atual, [setor]: novaOrdem }));
     fetch("/api/fila", {
       method: "POST",
@@ -165,6 +162,26 @@ export default function KanbanPage() {
     }).catch(() => {
       // se falhar, a próxima carregarFila() volta pro estado salvo no banco
     });
+  }
+
+  function moverCard(setor: string, cardsAtuais: OP[], indice: number, direcao: -1 | 1) {
+    const destino = indice + direcao;
+    if (destino < 0 || destino >= cardsAtuais.length) return;
+    const nova = [...cardsAtuais];
+    [nova[indice], nova[destino]] = [nova[destino], nova[indice]];
+    persistirOrdem(setor, nova.map(filaKey));
+  }
+
+  function arrastarPara(setor: string, cardsAtuais: OP[], chaveOrigem: string, chaveDestino: string) {
+    if (chaveOrigem === chaveDestino) return;
+    const chaves = cardsAtuais.map(filaKey);
+    const indiceOrigem = chaves.indexOf(chaveOrigem);
+    const indiceDestino = chaves.indexOf(chaveDestino);
+    if (indiceOrigem === -1 || indiceDestino === -1) return;
+    const nova = [...cardsAtuais];
+    const [removido] = nova.splice(indiceOrigem, 1);
+    nova.splice(indiceDestino, 0, removido);
+    persistirOrdem(setor, nova.map(filaKey));
   }
 
   const buscaNormalizada = normaliza(busca.trim());
@@ -474,10 +491,49 @@ export default function KanbanPage() {
                             previsao = addDias(new Date(), diasPrevisao);
                           }
 
+                          const emReordenacao = setorReordenando === setor;
+                          const chave = filaKey(op);
                           return (
-                            <div key={op.id} style={{ ...estilos.card, borderLeftColor: cor }}>
-                              {setorReordenando === setor && (
+                            <div
+                              key={op.id}
+                              draggable={emReordenacao}
+                              onDragStart={(e) => {
+                                setArrastandoChave(chave);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                if (!emReordenacao || !arrastandoChave) return;
+                                e.preventDefault();
+                                if (sobreChave !== chave) setSobreChave(chave);
+                              }}
+                              onDragLeave={() => {
+                                if (sobreChave === chave) setSobreChave(null);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (arrastandoChave) arrastarPara(setor, cards, arrastandoChave, chave);
+                                setArrastandoChave(null);
+                                setSobreChave(null);
+                              }}
+                              onDragEnd={() => {
+                                setArrastandoChave(null);
+                                setSobreChave(null);
+                              }}
+                              style={{
+                                ...estilos.card,
+                                borderLeftColor: cor,
+                                ...(emReordenacao ? estilos.cardArrastavel : {}),
+                                ...(arrastandoChave === chave ? estilos.cardArrastando : {}),
+                                ...(sobreChave === chave && arrastandoChave !== chave
+                                  ? estilos.cardAlvoDrop
+                                  : {}),
+                              }}
+                            >
+                              {emReordenacao && (
                                 <div style={estilos.cardReordenar}>
+                                  <span style={estilos.cardAlca} title="Arraste para reordenar">
+                                    ⠿
+                                  </span>
                                   <button
                                     onClick={() => moverCard(setor, cards, indice, -1)}
                                     disabled={indice === 0}
@@ -869,6 +925,22 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "inline-block",
     background: "#eef2ff",
     color: "#4338ca",
+  },
+  cardArrastavel: {
+    cursor: "grab",
+    transition: "transform 0.1s, box-shadow 0.1s, opacity 0.1s",
+  },
+  cardArrastando: {
+    opacity: 0.4,
+  },
+  cardAlvoDrop: {
+    boxShadow: "0 0 0 2px #6366f1, 0 1px 3px rgba(0,0,0,0.08)",
+  },
+  cardAlca: {
+    color: "#9ca3af",
+    fontSize: 14,
+    marginRight: 2,
+    cursor: "grab",
   },
   cardReordenar: {
     display: "flex",

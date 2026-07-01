@@ -34,6 +34,13 @@ function corAlerta(dias: number | null): string {
   return "#16a34a";
 }
 
+function normaliza(texto: string): string {
+  return texto
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
 export default function KanbanPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,6 +50,7 @@ export default function KanbanPage() {
     new Set(SETORES_ORDEM)
   );
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
+  const [busca, setBusca] = useState("");
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -82,15 +90,27 @@ export default function KanbanPage() {
     return () => clearInterval(interval);
   }, [carregarDados]);
 
+  const buscaNormalizada = normaliza(busca.trim());
+
+  const opsFiltradas = useMemo(() => {
+    if (!buscaNormalizada) return ops;
+    return ops.filter(
+      (op) =>
+        normaliza(op.op_numero).includes(buscaNormalizada) ||
+        normaliza(op.codigo || "").includes(buscaNormalizada) ||
+        normaliza(op.produto || "").includes(buscaNormalizada)
+    );
+  }, [ops, buscaNormalizada]);
+
   const opsPorSetor = useMemo(() => {
     const mapa = new Map<string, OP[]>();
     for (const setor of SETORES_ORDEM) mapa.set(setor, []);
-    for (const op of ops) {
+    for (const op of opsFiltradas) {
       if (!mapa.has(op.setor)) mapa.set(op.setor, []); // setor fora da lista fixa, mostra mesmo assim
       mapa.get(op.setor)!.push(op);
     }
     return mapa;
-  }, [ops]);
+  }, [opsFiltradas]);
 
   const colunasParaExibir = useMemo(() => {
     const todasColunas = Array.from(opsPorSetor.keys());
@@ -109,178 +129,391 @@ export default function KanbanPage() {
     persistirSetoresVisiveis(novo);
   }
 
-  const totalOps = ops.length;
-  const totalPecas = ops.reduce((acc, op) => acc + (op.quantidade || 0), 0);
+  const totalOps = opsFiltradas.length;
+  const totalPecas = opsFiltradas.reduce((acc, op) => acc + (op.quantidade || 0), 0);
 
   return (
-    <div style={{ padding: "20px 24px", minHeight: "100vh" }}>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          flexWrap: "wrap",
-          gap: 12,
-          marginBottom: 16,
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>
-            Victory Pijamas — Produção
-          </h1>
-          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#666" }}>
-            {totalOps} OPs em andamento · {totalPecas.toLocaleString("pt-BR")} peças
+    <div style={{ minHeight: "100vh" }}>
+      <header style={estilos.header}>
+        <div style={estilos.headerTopo}>
+          <div>
+            <h1 style={estilos.titulo}>Victory Pijamas</h1>
+            <p style={estilos.subtitulo}>Kanban de Produção</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button
+              onClick={() => setMostrarFiltro((v) => !v)}
+              style={{ ...estilos.botao, ...(mostrarFiltro ? estilos.botaoAtivo : {}) }}
+            >
+              Setores visíveis
+            </button>
+            <button onClick={carregarDados} style={estilos.botao}>
+              ↻ Atualizar
+            </button>
+            <a href="/upload" style={{ ...estilos.botao, ...estilos.botaoPrimario }}>
+              Enviar planilha
+            </a>
+          </div>
+        </div>
+
+        <div style={estilos.headerBaixo}>
+          <div style={estilos.buscaWrapper}>
+            <span style={estilos.buscaIcone}>⌕</span>
+            <input
+              type="text"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por OP, código ou produto..."
+              style={estilos.buscaInput}
+            />
+            {busca && (
+              <button onClick={() => setBusca("")} style={estilos.buscaLimpar} aria-label="Limpar busca">
+                ×
+              </button>
+            )}
+          </div>
+
+          <p style={estilos.stats}>
+            <strong>{totalOps}</strong> OP{totalOps === 1 ? "" : "s"} em andamento ·{" "}
+            <strong>{totalPecas.toLocaleString("pt-BR")}</strong> peças
             {ultimaAtualizacao && (
-              <> · atualizado às {ultimaAtualizacao.toLocaleTimeString("pt-BR")}</>
+              <span style={{ color: "#9ca3af" }}>
+                {" "}
+                · atualizado às {ultimaAtualizacao.toLocaleTimeString("pt-BR")}
+              </span>
             )}
           </p>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button
-            onClick={() => setMostrarFiltro((v) => !v)}
-            style={botaoSecundario}
-          >
-            Setores visíveis
-          </button>
-          <button onClick={carregarDados} style={botaoSecundario}>
-            Atualizar agora
-          </button>
-          <a href="/upload" style={{ ...botaoSecundario, textDecoration: "none" }}>
-            Enviar planilha
-          </a>
-        </div>
+
+        {mostrarFiltro && (
+          <div style={estilos.filtroPainel}>
+            {SETORES_ORDEM.map((setor) => (
+              <label key={setor} style={estilos.filtroItem}>
+                <input
+                  type="checkbox"
+                  checked={setoresVisiveis.has(setor)}
+                  onChange={() => toggleSetor(setor)}
+                />
+                {setor}
+              </label>
+            ))}
+          </div>
+        )}
       </header>
 
-      {mostrarFiltro && (
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid #e5e7eb",
-            borderRadius: 8,
-            padding: 12,
-            marginBottom: 16,
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-          }}
-        >
-          {SETORES_ORDEM.map((setor) => (
-            <label
-              key={setor}
-              style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}
-            >
-              <input
-                type="checkbox"
-                checked={setoresVisiveis.has(setor)}
-                onChange={() => toggleSetor(setor)}
-              />
-              {setor}
-            </label>
-          ))}
-        </div>
-      )}
+      <main style={{ padding: "0 24px 24px" }}>
+        {erro && (
+          <div style={estilos.erroBox}>
+            <strong>Erro:</strong> {erro}
+          </div>
+        )}
 
-      {erro && (
-        <div style={{ background: "#fee2e2", color: "#991b1b", padding: 10, borderRadius: 8, marginBottom: 16 }}>
-          Erro: {erro}
-        </div>
-      )}
-
-      {loading ? (
-        <p>Carregando...</p>
-      ) : totalOps === 0 ? (
-        <div style={{ textAlign: "center", padding: 40, color: "#666" }}>
-          Nenhuma OP encontrada. <a href="/upload">Envie a primeira planilha</a>.
-        </div>
-      ) : (
-        <div style={{ display: "flex", gap: 12, overflowX: "auto", paddingBottom: 12 }}>
-          {colunasParaExibir.map((setor) => {
-            const cards = (opsPorSetor.get(setor) || []).sort(
-              (a, b) => (b.quantidade || 0) - (a.quantidade || 0)
-            );
-            return (
-              <div
-                key={setor}
-                style={{
-                  minWidth: 260,
-                  maxWidth: 260,
-                  background: "#eef0f3",
-                  borderRadius: 10,
-                  padding: 10,
-                  flexShrink: 0,
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: 13,
-                    marginBottom: 8,
-                    display: "flex",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>{setor}</span>
-                  <span style={{ color: "#666", fontWeight: 400 }}>{cards.length}</span>
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {cards.map((op) => {
-                    const dias = diasNoSetor(op.data_envio_fase);
-                    const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
-                    return (
-                      <div
-                        key={op.id}
-                        style={{
-                          background: "#fff",
-                          borderRadius: 8,
-                          padding: "8px 10px",
-                          boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
-                          fontSize: 12.5,
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
-                          <span>OP {op.op_numero}</span>
-                          <span>{op.quantidade.toLocaleString("pt-BR")} pç</span>
-                        </div>
-                        <div style={{ color: "#333", marginTop: 2 }}>{op.codigo}</div>
-                        <div style={{ color: "#555", marginTop: 2, lineHeight: 1.3 }}>
-                          {op.produto}
-                        </div>
-                        {mostrarOficina && op.oficina && (
-                          <div style={{ color: "#555", marginTop: 4 }}>
-                            Oficina: <strong>{op.oficina}</strong>
+        {loading ? (
+          <div style={estilos.estadoVazio}>Carregando...</div>
+        ) : ops.length === 0 ? (
+          <div style={estilos.estadoVazio}>
+            Nenhuma OP encontrada.{" "}
+            <a href="/upload" style={estilos.link}>
+              Envie a primeira planilha
+            </a>
+            .
+          </div>
+        ) : totalOps === 0 ? (
+          <div style={estilos.estadoVazio}>
+            Nenhuma OP encontrada para <strong>&quot;{busca}&quot;</strong>.
+          </div>
+        ) : (
+          <div style={estilos.quadro}>
+            {colunasParaExibir.map((setor) => {
+              const cards = (opsPorSetor.get(setor) || []).sort(
+                (a, b) => (b.quantidade || 0) - (a.quantidade || 0)
+              );
+              const totalPecasSetor = cards.reduce((acc, op) => acc + (op.quantidade || 0), 0);
+              return (
+                <div key={setor} style={estilos.coluna}>
+                  <div style={estilos.colunaHeader}>
+                    <div style={estilos.colunaTitulo}>{setor}</div>
+                    <div style={estilos.colunaStats}>
+                      <span style={estilos.colunaBadge}>{cards.length} OP{cards.length === 1 ? "" : "s"}</span>
+                      <span style={estilos.colunaBadge}>
+                        {totalPecasSetor.toLocaleString("pt-BR")} pç
+                      </span>
+                    </div>
+                  </div>
+                  <div style={estilos.colunaCorpo}>
+                    {cards.length === 0 ? (
+                      <div style={estilos.colunaVazia}>Sem OPs</div>
+                    ) : (
+                      cards.map((op) => {
+                        const dias = diasNoSetor(op.data_envio_fase);
+                        const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
+                        const cor = corAlerta(dias);
+                        return (
+                          <div key={op.id} style={{ ...estilos.card, borderLeftColor: cor }}>
+                            <div style={estilos.cardTopo}>
+                              <span style={estilos.cardOp}>OP {op.op_numero}</span>
+                              <span style={estilos.cardQtde}>
+                                {op.quantidade.toLocaleString("pt-BR")} pç
+                              </span>
+                            </div>
+                            <div style={estilos.cardCodigo}>{op.codigo}</div>
+                            <div style={estilos.cardProduto}>{op.produto}</div>
+                            {mostrarOficina && op.oficina && (
+                              <div style={estilos.cardOficina}>
+                                Oficina: <strong>{op.oficina}</strong>
+                              </div>
+                            )}
+                            {dias !== null && (
+                              <div style={{ ...estilos.cardDias, color: cor, background: cor + "1a" }}>
+                                {dias === 0 ? "Entrou hoje" : `${dias} dia${dias > 1 ? "s" : ""} no setor`}
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {dias !== null && (
-                          <div
-                            style={{
-                              marginTop: 6,
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: corAlerta(dias),
-                            }}
-                          >
-                            {dias === 0 ? "Entrou hoje" : `${dias} dia${dias > 1 ? "s" : ""} no setor`}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        )}
+      </main>
     </div>
   );
 }
 
-const botaoSecundario: React.CSSProperties = {
-  background: "#fff",
-  border: "1px solid #d1d5db",
-  borderRadius: 6,
-  padding: "6px 12px",
-  fontSize: 13,
-  cursor: "pointer",
-  color: "#1a1a2e",
+const estilos: Record<string, React.CSSProperties> = {
+  header: {
+    position: "sticky",
+    top: 0,
+    zIndex: 10,
+    background: "#14142b",
+    color: "#fff",
+    padding: "20px 24px 16px",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+  },
+  headerTopo: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  titulo: {
+    margin: 0,
+    fontSize: 22,
+    fontWeight: 800,
+    letterSpacing: -0.3,
+  },
+  subtitulo: {
+    margin: "2px 0 0",
+    fontSize: 13,
+    color: "#a5a6c9",
+    fontWeight: 500,
+  },
+  botao: {
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    padding: "8px 14px",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+    color: "#fff",
+    textDecoration: "none",
+    transition: "background 0.15s",
+  },
+  botaoAtivo: {
+    background: "rgba(255,255,255,0.2)",
+    borderColor: "rgba(255,255,255,0.3)",
+  },
+  botaoPrimario: {
+    background: "#6366f1",
+    borderColor: "#6366f1",
+  },
+  headerBaixo: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 12,
+    marginTop: 16,
+  },
+  buscaWrapper: {
+    position: "relative",
+    flex: "1 1 320px",
+    maxWidth: 420,
+  },
+  buscaIcone: {
+    position: "absolute",
+    left: 12,
+    top: "50%",
+    transform: "translateY(-50%)",
+    color: "#8b8caf",
+    fontSize: 15,
+    pointerEvents: "none",
+  },
+  buscaInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    padding: "9px 32px 9px 34px",
+    fontSize: 13.5,
+    color: "#fff",
+    outline: "none",
+  },
+  buscaLimpar: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "transparent",
+    border: "none",
+    color: "#a5a6c9",
+    fontSize: 18,
+    cursor: "pointer",
+    lineHeight: 1,
+    padding: 4,
+  },
+  stats: {
+    margin: 0,
+    fontSize: 13,
+    color: "#c7c8e6",
+    whiteSpace: "nowrap",
+  },
+  filtroPainel: {
+    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(255,255,255,0.12)",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 14,
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 12,
+  },
+  filtroItem: {
+    fontSize: 12.5,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    color: "#e5e6f7",
+  },
+  erroBox: {
+    background: "#fee2e2",
+    color: "#991b1b",
+    padding: "10px 14px",
+    borderRadius: 8,
+    marginTop: 16,
+    fontSize: 13.5,
+  },
+  estadoVazio: {
+    textAlign: "center",
+    padding: 60,
+    color: "#6b7280",
+    fontSize: 14,
+  },
+  link: {
+    color: "#4f46e5",
+    fontWeight: 600,
+  },
+  quadro: {
+    display: "flex",
+    gap: 14,
+    overflowX: "auto",
+    paddingTop: 20,
+    paddingBottom: 12,
+    alignItems: "flex-start",
+  },
+  coluna: {
+    minWidth: 270,
+    maxWidth: 270,
+    background: "#eceef2",
+    borderRadius: 12,
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    maxHeight: "calc(100vh - 170px)",
+  },
+  colunaHeader: {
+    padding: "12px 12px 10px",
+    borderBottom: "1px solid #dde0e6",
+  },
+  colunaTitulo: {
+    fontWeight: 700,
+    fontSize: 13,
+    color: "#1f2937",
+    textTransform: "uppercase",
+    letterSpacing: 0.3,
+  },
+  colunaStats: {
+    display: "flex",
+    gap: 6,
+    marginTop: 6,
+  },
+  colunaBadge: {
+    background: "#fff",
+    border: "1px solid #d1d5db",
+    borderRadius: 999,
+    padding: "2px 9px",
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#4b5563",
+  },
+  colunaCorpo: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    padding: 10,
+    overflowY: "auto",
+  },
+  colunaVazia: {
+    textAlign: "center",
+    color: "#9ca3af",
+    fontSize: 12,
+    padding: "16px 0",
+  },
+  card: {
+    background: "#fff",
+    borderRadius: 8,
+    borderLeft: "4px solid #9ca3af",
+    padding: "10px 12px",
+    boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+    fontSize: 12.5,
+  },
+  cardTopo: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontWeight: 700,
+    color: "#111827",
+  },
+  cardQtde: {
+    color: "#4b5563",
+    fontWeight: 600,
+  },
+  cardCodigo: {
+    color: "#374151",
+    marginTop: 3,
+    fontWeight: 500,
+  },
+  cardProduto: {
+    color: "#6b7280",
+    marginTop: 2,
+    lineHeight: 1.35,
+  },
+  cardOficina: {
+    color: "#4b5563",
+    marginTop: 6,
+    fontSize: 12,
+  },
+  cardDias: {
+    marginTop: 8,
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "3px 8px",
+    borderRadius: 999,
+    display: "inline-block",
+  },
 };

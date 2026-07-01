@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { SETORES_ORDEM, SETORES_COM_OFICINA } from "@/lib/setores";
+import { SETORES_ORDEM, SETORES_COM_OFICINA, SETORES_COM_CAPACIDADE } from "@/lib/setores";
 
 type OP = {
   id: number;
@@ -34,6 +34,13 @@ function corAlerta(dias: number | null): string {
   return "#16a34a";
 }
 
+function corOcupacao(percentual: number | null): string {
+  if (percentual === null) return "#9ca3af";
+  if (percentual >= 100) return "#dc2626";
+  if (percentual >= 80) return "#d97706";
+  return "#16a34a";
+}
+
 function normaliza(texto: string): string {
   return texto
     .toLowerCase()
@@ -51,6 +58,8 @@ export default function KanbanPage() {
   );
   const [mostrarFiltro, setMostrarFiltro] = useState(false);
   const [busca, setBusca] = useState("");
+  const [capacidadeSetores, setCapacidadeSetores] = useState<Record<string, number>>({});
+  const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -84,11 +93,27 @@ export default function KanbanPage() {
     }
   }, []);
 
+  const carregarCapacidade = useCallback(async () => {
+    try {
+      const resp = await fetch("/api/capacidade", { cache: "no-store" });
+      const data = await resp.json();
+      if (!resp.ok) return;
+      setCapacidadeSetores(data.setores || {});
+      setCapacidadeOficinas(data.oficinas || {});
+    } catch {
+      // capacidade é informativa; falha aqui não deve travar o kanban
+    }
+  }, []);
+
   useEffect(() => {
     carregarDados();
-    const interval = setInterval(carregarDados, REFRESH_MS);
+    carregarCapacidade();
+    const interval = setInterval(() => {
+      carregarDados();
+      carregarCapacidade();
+    }, REFRESH_MS);
     return () => clearInterval(interval);
-  }, [carregarDados]);
+  }, [carregarDados, carregarCapacidade]);
 
   const buscaNormalizada = normaliza(busca.trim());
 
@@ -150,6 +175,9 @@ export default function KanbanPage() {
             <button onClick={carregarDados} style={estilos.botao}>
               ↻ Atualizar
             </button>
+            <a href="/capacidade" style={estilos.botao}>
+              Capacidade
+            </a>
             <a href="/upload" style={{ ...estilos.botao, ...estilos.botaoPrimario }}>
               Enviar planilha
             </a>
@@ -229,6 +257,27 @@ export default function KanbanPage() {
                 (a, b) => (b.quantidade || 0) - (a.quantidade || 0)
               );
               const totalPecasSetor = cards.reduce((acc, op) => acc + (op.quantidade || 0), 0);
+
+              let capacidadeSetor: number | null = null;
+              if ((SETORES_COM_CAPACIDADE as readonly string[]).includes(setor)) {
+                capacidadeSetor = capacidadeSetores[setor] ?? 0;
+              } else if (setor === "COSTURA EXTERNA") {
+                const oficinasDoSetor = new Set(cards.map((op) => op.oficina).filter(Boolean) as string[]);
+                capacidadeSetor = Array.from(oficinasDoSetor).reduce(
+                  (acc, oficina) => acc + (capacidadeOficinas[oficina] ?? 0),
+                  0
+                );
+              }
+              const ocupacao =
+                capacidadeSetor !== null && capacidadeSetor > 0
+                  ? (totalPecasSetor / capacidadeSetor) * 100
+                  : null;
+              const diasServico =
+                capacidadeSetor !== null && capacidadeSetor > 0
+                  ? totalPecasSetor / capacidadeSetor
+                  : null;
+              const corOcup = corOcupacao(ocupacao);
+
               return (
                 <div key={setor} style={estilos.coluna}>
                   <div style={estilos.colunaHeader}>
@@ -239,6 +288,28 @@ export default function KanbanPage() {
                         {totalPecasSetor.toLocaleString("pt-BR")} pç
                       </span>
                     </div>
+                    {ocupacao !== null && (
+                      <div style={{ ...estilos.capacidadeBox, borderColor: corOcup }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                          <span style={{ ...estilos.capacidadePercent, color: corOcup }}>
+                            {ocupacao.toFixed(0)}% da capacidade
+                          </span>
+                          {ocupacao >= 100 && <span style={{ fontSize: 12 }}>⚠️</span>}
+                        </div>
+                        <div style={estilos.capacidadeBarraFundo}>
+                          <div
+                            style={{
+                              ...estilos.capacidadeBarraPreenchida,
+                              width: `${Math.min(100, ocupacao)}%`,
+                              background: corOcup,
+                            }}
+                          />
+                        </div>
+                        <span style={estilos.capacidadeDias}>
+                          ≈ {diasServico!.toFixed(1)} dia{diasServico! >= 2 ? "s" : ""} de serviço
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div style={estilos.colunaCorpo}>
                     {cards.length === 0 ? (
@@ -461,6 +532,36 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 11,
     fontWeight: 600,
     color: "#4b5563",
+  },
+  capacidadeBox: {
+    marginTop: 10,
+    background: "#fff",
+    border: "1px solid",
+    borderRadius: 8,
+    padding: "8px 10px",
+  },
+  capacidadePercent: {
+    fontSize: 11.5,
+    fontWeight: 700,
+  },
+  capacidadeBarraFundo: {
+    marginTop: 5,
+    height: 5,
+    borderRadius: 999,
+    background: "#e5e7eb",
+    overflow: "hidden",
+  },
+  capacidadeBarraPreenchida: {
+    height: "100%",
+    borderRadius: 999,
+    transition: "width 0.2s",
+  },
+  capacidadeDias: {
+    display: "block",
+    marginTop: 5,
+    fontSize: 11,
+    color: "#6b7280",
+    fontWeight: 500,
   },
   colunaCorpo: {
     display: "flex",

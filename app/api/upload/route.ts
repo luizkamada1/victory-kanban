@@ -59,15 +59,21 @@ export async function POST(req: NextRequest) {
 
     for (const row of rows) {
       const opNumero = String(row["Producao"] ?? "").trim();
-      const setor = String(row["Fase_1"] ?? "").trim();
+      let setor = String(row["Fase_1"] ?? "").trim();
       if (!opNumero || !setor) continue;
 
-      const chave = `${opNumero}__${setor}`;
       const qtde = Number(row["Qtde andamento"] ?? 0) || 0;
       const dataEnvio = excelDateToISO(row["Data envio fase"]);
       const dataOp = excelDateToISO(row["Data OP"]);
       const dataEntrega = excelDateToISO(row["Data de entrega"]);
       const oficina = row["Oficina"] ? String(row["Oficina"]).trim() : null;
+
+      // Divide o setor COSTURA em COSTURA INTERNA / COSTURA EXTERNA conforme a oficina
+      if (setor === "COSTURA") {
+        setor = oficina && oficina.toUpperCase() === "COSTURA INTERNA" ? "COSTURA INTERNA" : "COSTURA EXTERNA";
+      }
+
+      const chave = `${opNumero}__${setor}__${oficina ?? ""}`;
 
       const existente = grupos.get(chave);
       if (existente) {

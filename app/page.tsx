@@ -278,6 +278,21 @@ export default function KanbanPage() {
                   : null;
               const corOcup = corOcupacao(ocupacao);
 
+              const breakdownOficinas =
+                setor === "COSTURA EXTERNA"
+                  ? Array.from(new Set(cards.map((op) => op.oficina).filter(Boolean) as string[]))
+                      .map((oficina) => {
+                        const totalOficina = cards
+                          .filter((op) => op.oficina === oficina)
+                          .reduce((acc, op) => acc + (op.quantidade || 0), 0);
+                        const capOficina = capacidadeOficinas[oficina] ?? 0;
+                        const ocupOficina = capOficina > 0 ? (totalOficina / capOficina) * 100 : null;
+                        const diasOficina = capOficina > 0 ? totalOficina / capOficina : null;
+                        return { oficina, totalOficina, capOficina, ocupOficina, diasOficina };
+                      })
+                      .sort((a, b) => (b.ocupOficina ?? -1) - (a.ocupOficina ?? -1))
+                  : [];
+
               return (
                 <div key={setor} style={estilos.coluna}>
                   <div style={estilos.colunaHeader}>
@@ -308,6 +323,38 @@ export default function KanbanPage() {
                         <span style={estilos.capacidadeDias}>
                           ≈ {diasServico!.toFixed(1)} dia{diasServico! >= 2 ? "s" : ""} de serviço
                         </span>
+                      </div>
+                    )}
+                    {breakdownOficinas.length > 0 && (
+                      <div style={estilos.oficinasBreakdown}>
+                        {breakdownOficinas.map(
+                          ({ oficina, totalOficina, capOficina, ocupOficina, diasOficina }) => {
+                            const corOf = corOcupacao(ocupOficina);
+                            return (
+                              <div key={oficina} style={estilos.oficinaLinha}>
+                                <div style={estilos.oficinaLinhaTopo}>
+                                  <span style={estilos.oficinaNome} title={oficina}>
+                                    {oficina}
+                                  </span>
+                                  <span style={{ color: corOf, fontWeight: 700 }}>
+                                    {ocupOficina !== null ? `${ocupOficina.toFixed(0)}%` : "s/ capacidade"}
+                                  </span>
+                                </div>
+                                <div style={estilos.oficinaLinhaBaixo}>
+                                  <span>
+                                    {totalOficina.toLocaleString("pt-BR")}
+                                    {capOficina > 0 ? ` / ${capOficina.toLocaleString("pt-BR")}` : ""} pç
+                                  </span>
+                                  {diasOficina !== null && (
+                                    <span>
+                                      ≈ {diasOficina.toFixed(1)} dia{diasOficina >= 2 ? "s" : ""}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        )}
                       </div>
                     )}
                   </div>
@@ -562,6 +609,40 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 11,
     color: "#6b7280",
     fontWeight: 500,
+  },
+  oficinasBreakdown: {
+    marginTop: 8,
+    display: "flex",
+    flexDirection: "column",
+    gap: 5,
+    maxHeight: 150,
+    overflowY: "auto",
+  },
+  oficinaLinha: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 6,
+    padding: "5px 8px",
+  },
+  oficinaLinhaTopo: {
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 6,
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#1f2937",
+  },
+  oficinaNome: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  },
+  oficinaLinhaBaixo: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontSize: 10.5,
+    color: "#9ca3af",
+    marginTop: 2,
   },
   colunaCorpo: {
     display: "flex",

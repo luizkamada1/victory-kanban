@@ -83,11 +83,6 @@ export default function KanbanPage() {
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
   const [setorReordenando, setSetorReordenando] = useState<string | null>(null);
-  const [arrastandoChave, setArrastandoChave] = useState<string | null>(null);
-  const [setorArrastando, setSetorArrastando] = useState<string | null>(null);
-  const [indiceAlvoDrop, setIndiceAlvoDrop] = useState<number | null>(null);
-  const [dragOp, setDragOp] = useState<OP | null>(null);
-  const [pontoArraste, setPontoArraste] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -172,18 +167,6 @@ export default function KanbanPage() {
     if (destino < 0 || destino >= cardsAtuais.length) return;
     const nova = [...cardsAtuais];
     [nova[indice], nova[destino]] = [nova[destino], nova[indice]];
-    persistirOrdem(setor, nova.map(filaKey));
-  }
-
-  // posicaoNaListaSemArrastado: posição de inserção já considerando a lista SEM o card
-  // arrastado (é assim que o placeholder visual é calculado durante o arraste).
-  function arrastarParaPosicao(setor: string, cardsAtuais: OP[], chaveOrigem: string, posicaoNaListaSemArrastado: number) {
-    const indiceOrigem = cardsAtuais.findIndex((op) => filaKey(op) === chaveOrigem);
-    if (indiceOrigem === -1) return;
-    const semArrastado = cardsAtuais.filter((op) => filaKey(op) !== chaveOrigem);
-    const alvo = Math.max(0, Math.min(posicaoNaListaSemArrastado, semArrastado.length));
-    const nova = [...semArrastado];
-    nova.splice(alvo, 0, cardsAtuais[indiceOrigem]);
     persistirOrdem(setor, nova.map(filaKey));
   }
 
@@ -467,11 +450,7 @@ export default function KanbanPage() {
                       </>
                     )}
                   </div>
-                  <div
-                    style={estilos.colunaCorpo}
-                    data-coluna-corpo="1"
-                    data-setor={setor}
-                  >
+                  <div style={estilos.colunaCorpo}>
                     {cards.length === 0 ? (
                       <div style={estilos.colunaVazia}>Sem OPs</div>
                     ) : (
@@ -479,25 +458,7 @@ export default function KanbanPage() {
                         let acumuladoColuna = 0;
                         const acumuladoPorOficina: Record<string, number> = {};
                         const emReordenacao = setorReordenando === setor;
-                        const arrastandoNesteSetor = emReordenacao && setorArrastando === setor;
-                        const nos: React.ReactNode[] = [];
-                        let posSemArrastado = 0;
-
-                        cards.forEach((op, indice) => {
-                          const chave = filaKey(op);
-                          const éODragged = arrastandoNesteSetor && chave === arrastandoChave;
-                          if (éODragged) return;
-
-                          if (arrastandoNesteSetor && indiceAlvoDrop === posSemArrastado) {
-                            nos.push(
-                              <div key="placeholder" style={estilos.cardPlaceholder}>
-                                Soltar aqui
-                              </div>
-                            );
-                          }
-
-                          posSemArrastado++;
-
+                        return cards.map((op, indice) => {
                           const dias = diasNoSetor(op.data_envio_fase);
                           const mostrarOficina = SETORES_COM_OFICINA.includes(op.setor);
                           const cor = corAlerta(dias);
@@ -517,69 +478,10 @@ export default function KanbanPage() {
                             previsao = addDias(new Date(), diasPrevisao);
                           }
 
-                          const posicaoCard = posSemArrastado - 1;
-
-                          nos.push(
-                            <div
-                              key={op.id}
-                              data-card-key={chave}
-                              data-setor={setor}
-                              data-pos={posicaoCard}
-                              style={{ ...estilos.card, borderLeftColor: cor }}
-                            >
+                          return (
+                            <div key={op.id} style={{ ...estilos.card, borderLeftColor: cor }}>
                               {emReordenacao && (
                                 <div style={estilos.cardReordenar}>
-                                  <span
-                                    style={{ ...estilos.cardAlca, touchAction: "none" }}
-                                    title="Arraste para reordenar"
-                                    onPointerDown={(e) => {
-                                      e.preventDefault();
-                                      (e.target as HTMLElement).setPointerCapture(e.pointerId);
-                                      setArrastandoChave(chave);
-                                      setSetorArrastando(setor);
-                                      setIndiceAlvoDrop(posicaoCard);
-                                      setDragOp(op);
-                                      setPontoArraste({ x: e.clientX, y: e.clientY });
-                                    }}
-                                    onPointerMove={(e) => {
-                                      if (arrastandoChave !== chave) return;
-                                      setPontoArraste({ x: e.clientX, y: e.clientY });
-                                      const elAbaixo = document.elementFromPoint(e.clientX, e.clientY);
-                                      const cardAlvoEl = elAbaixo?.closest(
-                                        "[data-card-key]"
-                                      ) as HTMLElement | null;
-                                      if (cardAlvoEl && cardAlvoEl.dataset.setor === setor) {
-                                        const posAlvo = Number(cardAlvoEl.dataset.pos);
-                                        const rect = cardAlvoEl.getBoundingClientRect();
-                                        const antes = e.clientY < rect.top + rect.height / 2;
-                                        const novoAlvo = antes ? posAlvo : posAlvo + 1;
-                                        setIndiceAlvoDrop((atual) => (atual === novoAlvo ? atual : novoAlvo));
-                                        return;
-                                      }
-                                      const corpoEl = elAbaixo?.closest(
-                                        "[data-coluna-corpo]"
-                                      ) as HTMLElement | null;
-                                      if (corpoEl && corpoEl.dataset.setor === setor) {
-                                        const fimLista = cards.filter(
-                                          (c) => filaKey(c) !== arrastandoChave
-                                        ).length;
-                                        setIndiceAlvoDrop((atual) => (atual === fimLista ? atual : fimLista));
-                                      }
-                                    }}
-                                    onPointerUp={(e) => {
-                                      if (arrastandoChave === chave && indiceAlvoDrop !== null) {
-                                        arrastarParaPosicao(setor, cards, chave, indiceAlvoDrop);
-                                      }
-                                      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
-                                      setArrastandoChave(null);
-                                      setSetorArrastando(null);
-                                      setIndiceAlvoDrop(null);
-                                      setDragOp(null);
-                                      setPontoArraste(null);
-                                    }}
-                                  >
-                                    ⠿
-                                  </span>
                                   <button
                                     onClick={() => moverCard(setor, cards, indice, -1)}
                                     disabled={indice === 0}
@@ -631,16 +533,6 @@ export default function KanbanPage() {
                             </div>
                           );
                         });
-
-                        if (arrastandoNesteSetor && indiceAlvoDrop === posSemArrastado) {
-                          nos.push(
-                            <div key="placeholder-fim" style={estilos.cardPlaceholder}>
-                              Soltar aqui
-                            </div>
-                          );
-                        }
-
-                        return nos;
                       })()
                     )}
                   </div>
@@ -650,22 +542,6 @@ export default function KanbanPage() {
           </div>
         )}
       </main>
-
-      {dragOp && pontoArraste && (
-        <div
-          style={{
-            ...estilos.cardGhost,
-            left: pontoArraste.x + 14,
-            top: pontoArraste.y + 14,
-          }}
-        >
-          <div style={estilos.cardGhostTopo}>
-            <span>OP {dragOp.op_numero}</span>
-            <span>{dragOp.quantidade.toLocaleString("pt-BR")} pç</span>
-          </div>
-          <div style={estilos.cardGhostProduto}>{dragOp.produto}</div>
-        </div>
-      )}
     </div>
   );
 }
@@ -997,48 +873,6 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "inline-block",
     background: "#eef2ff",
     color: "#4338ca",
-  },
-  cardGhost: {
-    position: "fixed",
-    zIndex: 50,
-    width: 220,
-    pointerEvents: "none",
-    background: "#fff",
-    border: "2px solid #6366f1",
-    borderRadius: 8,
-    padding: "8px 10px",
-    boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
-    fontSize: 12.5,
-    transform: "rotate(-2deg)",
-  },
-  cardGhostTopo: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontWeight: 700,
-    color: "#111827",
-  },
-  cardGhostProduto: {
-    color: "#6b7280",
-    marginTop: 2,
-    fontSize: 11.5,
-  },
-  cardPlaceholder: {
-    border: "2px dashed #a5b4fc",
-    background: "#eef2ff",
-    borderRadius: 8,
-    minHeight: 56,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 11,
-    fontWeight: 600,
-    color: "#6366f1",
-  },
-  cardAlca: {
-    color: "#9ca3af",
-    fontSize: 14,
-    marginRight: 2,
-    cursor: "grab",
   },
   cardReordenar: {
     display: "flex",

@@ -86,6 +86,8 @@ export default function KanbanPage() {
   const [arrastandoChave, setArrastandoChave] = useState<string | null>(null);
   const [setorArrastando, setSetorArrastando] = useState<string | null>(null);
   const [indiceAlvoDrop, setIndiceAlvoDrop] = useState<number | null>(null);
+  const [dragOp, setDragOp] = useState<OP | null>(null);
+  const [pontoArraste, setPontoArraste] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -467,24 +469,8 @@ export default function KanbanPage() {
                   </div>
                   <div
                     style={estilos.colunaCorpo}
-                    onDragOver={(e) => {
-                      if (setorArrastando !== setor) return;
-                      e.preventDefault();
-                      if (e.target === e.currentTarget) {
-                        const semArrastado = cards.filter((op) => filaKey(op) !== arrastandoChave);
-                        setIndiceAlvoDrop(semArrastado.length);
-                      }
-                    }}
-                    onDrop={(e) => {
-                      if (setorArrastando !== setor) return;
-                      e.preventDefault();
-                      if (arrastandoChave && indiceAlvoDrop !== null) {
-                        arrastarParaPosicao(setor, cards, arrastandoChave, indiceAlvoDrop);
-                      }
-                      setArrastandoChave(null);
-                      setSetorArrastando(null);
-                      setIndiceAlvoDrop(null);
-                    }}
+                    data-coluna-corpo="1"
+                    data-setor={setor}
                   >
                     {cards.length === 0 ? (
                       <div style={estilos.colunaVazia}>Sem OPs</div>
@@ -536,35 +522,62 @@ export default function KanbanPage() {
                           nos.push(
                             <div
                               key={op.id}
-                              draggable={emReordenacao}
-                              onDragStart={(e) => {
-                                setArrastandoChave(chave);
-                                setSetorArrastando(setor);
-                                setIndiceAlvoDrop(posicaoCard);
-                                e.dataTransfer.effectAllowed = "move";
-                              }}
-                              onDragOver={(e) => {
-                                if (!arrastandoNesteSetor) return;
-                                e.preventDefault();
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                const antes = e.clientY < rect.top + rect.height / 2;
-                                const novoAlvo = antes ? posicaoCard : posicaoCard + 1;
-                                if (indiceAlvoDrop !== novoAlvo) setIndiceAlvoDrop(novoAlvo);
-                              }}
-                              onDragEnd={() => {
-                                setArrastandoChave(null);
-                                setSetorArrastando(null);
-                                setIndiceAlvoDrop(null);
-                              }}
-                              style={{
-                                ...estilos.card,
-                                borderLeftColor: cor,
-                                ...(emReordenacao ? estilos.cardArrastavel : {}),
-                              }}
+                              data-card-key={chave}
+                              data-setor={setor}
+                              data-pos={posicaoCard}
+                              style={{ ...estilos.card, borderLeftColor: cor }}
                             >
                               {emReordenacao && (
                                 <div style={estilos.cardReordenar}>
-                                  <span style={estilos.cardAlca} title="Arraste para reordenar">
+                                  <span
+                                    style={{ ...estilos.cardAlca, touchAction: "none" }}
+                                    title="Arraste para reordenar"
+                                    onPointerDown={(e) => {
+                                      e.preventDefault();
+                                      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+                                      setArrastandoChave(chave);
+                                      setSetorArrastando(setor);
+                                      setIndiceAlvoDrop(posicaoCard);
+                                      setDragOp(op);
+                                      setPontoArraste({ x: e.clientX, y: e.clientY });
+                                    }}
+                                    onPointerMove={(e) => {
+                                      if (arrastandoChave !== chave) return;
+                                      setPontoArraste({ x: e.clientX, y: e.clientY });
+                                      const elAbaixo = document.elementFromPoint(e.clientX, e.clientY);
+                                      const cardAlvoEl = elAbaixo?.closest(
+                                        "[data-card-key]"
+                                      ) as HTMLElement | null;
+                                      if (cardAlvoEl && cardAlvoEl.dataset.setor === setor) {
+                                        const posAlvo = Number(cardAlvoEl.dataset.pos);
+                                        const rect = cardAlvoEl.getBoundingClientRect();
+                                        const antes = e.clientY < rect.top + rect.height / 2;
+                                        const novoAlvo = antes ? posAlvo : posAlvo + 1;
+                                        setIndiceAlvoDrop((atual) => (atual === novoAlvo ? atual : novoAlvo));
+                                        return;
+                                      }
+                                      const corpoEl = elAbaixo?.closest(
+                                        "[data-coluna-corpo]"
+                                      ) as HTMLElement | null;
+                                      if (corpoEl && corpoEl.dataset.setor === setor) {
+                                        const fimLista = cards.filter(
+                                          (c) => filaKey(c) !== arrastandoChave
+                                        ).length;
+                                        setIndiceAlvoDrop((atual) => (atual === fimLista ? atual : fimLista));
+                                      }
+                                    }}
+                                    onPointerUp={(e) => {
+                                      if (arrastandoChave === chave && indiceAlvoDrop !== null) {
+                                        arrastarParaPosicao(setor, cards, chave, indiceAlvoDrop);
+                                      }
+                                      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+                                      setArrastandoChave(null);
+                                      setSetorArrastando(null);
+                                      setIndiceAlvoDrop(null);
+                                      setDragOp(null);
+                                      setPontoArraste(null);
+                                    }}
+                                  >
                                     ⠿
                                   </span>
                                   <button
@@ -637,6 +650,22 @@ export default function KanbanPage() {
           </div>
         )}
       </main>
+
+      {dragOp && pontoArraste && (
+        <div
+          style={{
+            ...estilos.cardGhost,
+            left: pontoArraste.x + 14,
+            top: pontoArraste.y + 14,
+          }}
+        >
+          <div style={estilos.cardGhostTopo}>
+            <span>OP {dragOp.op_numero}</span>
+            <span>{dragOp.quantidade.toLocaleString("pt-BR")} pç</span>
+          </div>
+          <div style={estilos.cardGhostProduto}>{dragOp.produto}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -969,12 +998,29 @@ const estilos: Record<string, React.CSSProperties> = {
     background: "#eef2ff",
     color: "#4338ca",
   },
-  cardArrastavel: {
-    cursor: "grab",
-    transition: "transform 0.1s, box-shadow 0.1s, opacity 0.1s",
+  cardGhost: {
+    position: "fixed",
+    zIndex: 50,
+    width: 220,
+    pointerEvents: "none",
+    background: "#fff",
+    border: "2px solid #6366f1",
+    borderRadius: 8,
+    padding: "8px 10px",
+    boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
+    fontSize: 12.5,
+    transform: "rotate(-2deg)",
   },
-  cardArrastando: {
-    opacity: 0.4,
+  cardGhostTopo: {
+    display: "flex",
+    justifyContent: "space-between",
+    fontWeight: 700,
+    color: "#111827",
+  },
+  cardGhostProduto: {
+    color: "#6b7280",
+    marginTop: 2,
+    fontSize: 11.5,
   },
   cardPlaceholder: {
     border: "2px dashed #a5b4fc",

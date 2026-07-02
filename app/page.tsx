@@ -79,17 +79,17 @@ export default function KanbanPage() {
     }
   }, []);
 
-  useEffect(() => {
+  const atualizarTudo = useCallback(() => {
     carregarDados();
     carregarCapacidade();
     carregarFila();
-    const interval = setInterval(() => {
-      carregarDados();
-      carregarCapacidade();
-      carregarFila();
-    }, REFRESH_MS);
-    return () => clearInterval(interval);
   }, [carregarDados, carregarCapacidade, carregarFila]);
+
+  useEffect(() => {
+    atualizarTudo();
+    const interval = setInterval(atualizarTudo, REFRESH_MS);
+    return () => clearInterval(interval);
+  }, [atualizarTudo]);
 
   function persistirOrdem(setor: string, novaOrdem: string[]) {
     setFilaOrdem((atual) => ({ ...atual, [setor]: novaOrdem }));
@@ -161,7 +161,7 @@ export default function KanbanPage() {
             >
               Setores visíveis
             </button>
-            <button onClick={carregarDados} style={estilos.botao}>
+            <button onClick={atualizarTudo} style={estilos.botao}>
               ↻ Atualizar
             </button>
             <a href="/capacidade" style={estilos.botao}>

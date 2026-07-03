@@ -1,11 +1,23 @@
 import type { OP } from "./types";
 
+// Conta só dias úteis (segunda a sexta) entre a data de envio à fase e hoje —
+// sábado e domingo não contam como "parado" no setor. Não considera feriados.
 export function diasNoSetor(dataEnvioFase: string | null): number | null {
   if (!dataEnvioFase) return null;
   const envio = new Date(dataEnvioFase);
+  envio.setHours(0, 0, 0, 0);
   const hoje = new Date();
-  const diffMs = hoje.setHours(0, 0, 0, 0) - envio.setHours(0, 0, 0, 0);
-  return Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+  hoje.setHours(0, 0, 0, 0);
+  if (hoje <= envio) return 0;
+
+  let dias = 0;
+  const cursor = new Date(envio);
+  while (cursor < hoje) {
+    cursor.setDate(cursor.getDate() + 1);
+    const diaSemana = cursor.getDay(); // 0 = domingo, 6 = sábado
+    if (diaSemana !== 0 && diaSemana !== 6) dias++;
+  }
+  return dias;
 }
 
 export function corAlerta(dias: number | null): string {

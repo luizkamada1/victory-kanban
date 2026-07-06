@@ -42,6 +42,37 @@ function formataDataCurta(iso: string): string {
   return `${dia}/${mes}`;
 }
 
+// Ordem oficial do fluxo de produção pros gráficos que comparam setores.
+const ORDEM_SETORES_GRAFICO = [
+  "CORTE",
+  "ETIQUETAÇÃO",
+  "BORDADO",
+  "ESTAMPA",
+  "COSTURA INTERNA",
+  "COSTURA EXTERNA",
+  "ACABAMENTO",
+];
+
+function ordenarPorSetor<T extends { setor: string }>(itens: T[]): T[] {
+  return [...itens].sort((a, b) => {
+    const ia = ORDEM_SETORES_GRAFICO.indexOf(a.setor);
+    const ib = ORDEM_SETORES_GRAFICO.indexOf(b.setor);
+    const pa = ia === -1 ? 999 : ia;
+    const pb = ib === -1 ? 999 : ib;
+    if (pa !== pb) return pa - pb;
+    return a.setor.localeCompare(b.setor);
+  });
+}
+
+function TituloGrafico({ titulo, dica }: { titulo: string; dica: string }) {
+  return (
+    <div>
+      <h2 style={estilos.cardTitulo}>{titulo}</h2>
+      <p style={estilos.dicaTexto}>{dica}</p>
+    </div>
+  );
+}
+
 type PresetPeriodo = "hoje" | "semana" | "mes" | "mesPassado" | "personalizado";
 
 function calcularPeriodo(preset: PresetPeriodo): { inicio: string; fim: string } {
@@ -184,6 +215,39 @@ export default function DashboardPage() {
     const { inicio, fim } = calcularPeriodo(p);
     setEvolucaoInicio(inicio);
     setEvolucaoFim(fim);
+  }
+
+  const [presetEvolTotal, setPresetEvolTotal] = useState<PresetPeriodo>("mes");
+  const [evolTotalInicio, setEvolTotalInicio] = useState(() => calcularPeriodo("mes").inicio);
+  const [evolTotalFim, setEvolTotalFim] = useState(() => calcularPeriodo("mes").fim);
+  function mudarPresetEvolTotal(p: PresetPeriodo) {
+    setPresetEvolTotal(p);
+    if (p === "personalizado") return;
+    const { inicio, fim } = calcularPeriodo(p);
+    setEvolTotalInicio(inicio);
+    setEvolTotalFim(fim);
+  }
+
+  const [presetEvolSetor, setPresetEvolSetor] = useState<PresetPeriodo>("mes");
+  const [evolSetorInicio, setEvolSetorInicio] = useState(() => calcularPeriodo("mes").inicio);
+  const [evolSetorFim, setEvolSetorFim] = useState(() => calcularPeriodo("mes").fim);
+  function mudarPresetEvolSetor(p: PresetPeriodo) {
+    setPresetEvolSetor(p);
+    if (p === "personalizado") return;
+    const { inicio, fim } = calcularPeriodo(p);
+    setEvolSetorInicio(inicio);
+    setEvolSetorFim(fim);
+  }
+  const [setoresSelecionados, setSetoresSelecionados] = useState<Set<string> | null>(null);
+  const [mostrarSeletorSetores, setMostrarSeletorSetores] = useState(false);
+  function toggleSetorSelecionado(setor: string, todosPresentes: string[]) {
+    setSetoresSelecionados((atual) => {
+      const base = atual ?? new Set(todosPresentes);
+      const novo = new Set(base);
+      if (novo.has(setor)) novo.delete(setor);
+      else novo.add(setor);
+      return novo;
+    });
   }
 
   useEffect(() => {
@@ -351,29 +415,38 @@ export default function DashboardPage() {
   const evolucaoTotal = useMemo(() => {
     const porData = new Map<string, number>();
     for (const linha of historico) {
+      if (linha.data < evolTotalInicio || linha.data > evolTotalFim) continue;
       porData.set(linha.data, (porData.get(linha.data) ?? 0) + linha.total_pecas);
     }
     return Array.from(porData.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([data, pecas]) => ({ data: formataDataCurta(data), pecas }));
-  }, [historico]);
+  }, [historico, evolTotalInicio, evolTotalFim]);
 
   const { evolucaoPorSetor, setoresNaEvolucao } = useMemo(() => {
-    const datas = Array.from(new Set(historico.map((l) => l.data))).sort();
-    const setoresPresentes = Array.from(new Set(historico.map((l) => l.setor))).filter((s) =>
+    const historicoPeriodo = historico.filter(
+      (l) => l.data >= evolSetorInicio && l.data <= evolSetorFim
+    );
+    const datas = Array.from(new Set(historicoPeriodo.map((l) => l.data))).sort();
+    const setoresPresentes = Array.from(new Set(historicoPeriodo.map((l) => l.setor))).filter((s) =>
       (SETORES_ORDEM as readonly string[]).includes(s)
     );
     const ordenados = SETORES_ORDEM.filter((s) => setoresPresentes.includes(s));
     const linhas = datas.map((data) => {
       const linha: Record<string, string | number> = { data: formataDataCurta(data) };
       for (const setor of ordenados) {
-        const encontrado = historico.find((l) => l.data === data && l.setor === setor);
+        const encontrado = historicoPeriodo.find((l) => l.data === data && l.setor === setor);
         linha[setor] = encontrado?.total_pecas ?? 0;
       }
       return linha;
     });
     return { evolucaoPorSetor: linhas, setoresNaEvolucao: ordenados };
-  }, [historico]);
+  }, [historico, evolSetorInicio, evolSetorFim]);
+
+  const setoresParaExibirEvolucao = useMemo(
+    () => setoresNaEvolucao.filter((s) => (setoresSelecionados ?? new Set(setoresNaEvolucao)).has(s)),
+    [setoresNaEvolucao, setoresSelecionados]
+  );
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -409,7 +482,10 @@ export default function DashboardPage() {
         ) : (
           <div style={estilos.grade}>
             <section style={estilos.card}>
-              <h2 style={estilos.cardTitulo}>Peças por setor (agora)</h2>
+              <TituloGrafico
+                titulo="Peças por setor (agora)"
+                dica="Onde está concentrado o volume de peças parado neste momento."
+              />
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={pecasPorSetor} layout="vertical" margin={{ left: 24 }}>
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} />
@@ -422,7 +498,10 @@ export default function DashboardPage() {
             </section>
 
             <section style={estilos.card}>
-              <h2 style={estilos.cardTitulo}>% de ocupação por setor (agora)</h2>
+              <TituloGrafico
+                titulo="% de ocupação por setor (agora)"
+                dica="Quão perto (ou acima) da capacidade diária configurada cada setor está agora."
+              />
               {ocupacaoPorSetor.length === 0 ? (
                 <p style={estilos.semDados}>Configure a capacidade em /capacidade pra ver este gráfico.</p>
               ) : (
@@ -443,7 +522,10 @@ export default function DashboardPage() {
             </section>
 
             <section style={estilos.card}>
-              <h2 style={estilos.cardTitulo}>Distribuição de dias no setor</h2>
+              <TituloGrafico
+                titulo="Distribuição de dias no setor"
+                dica="Quantas OPs estão paradas há pouco tempo, tempo médio ou muito tempo — ajuda a ver gargalos."
+              />
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={distribuicaoDias}>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -456,7 +538,10 @@ export default function DashboardPage() {
             </section>
 
             <section style={estilos.card}>
-              <h2 style={estilos.cardTitulo}>Oficinas externas mais ocupadas</h2>
+              <TituloGrafico
+                titulo="Oficinas externas mais ocupadas"
+                dica="Quais facções terceirizadas estão mais sobrecarregadas em relação à capacidade delas."
+              />
               {rankingOficinas.length === 0 ? (
                 <p style={estilos.semDados}>
                   Configure a capacidade das oficinas em /capacidade pra ver este gráfico.
@@ -479,7 +564,20 @@ export default function DashboardPage() {
             </section>
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
-              <h2 style={estilos.cardTitulo}>Evolução do total de peças em produção</h2>
+              <div style={estilos.cardTituloComFiltro}>
+                <TituloGrafico
+                  titulo="Evolução do total de peças em produção"
+                  dica="Se o volume total parado na produção está crescendo ou diminuindo ao longo do tempo."
+                />
+                <FiltroPeriodo
+                  preset={presetEvolTotal}
+                  inicio={evolTotalInicio}
+                  fim={evolTotalFim}
+                  onPreset={mudarPresetEvolTotal}
+                  onInicio={setEvolTotalInicio}
+                  onFim={setEvolTotalFim}
+                />
+              </div>
               {evolucaoTotal.length < 2 ? (
                 <p style={estilos.semDados}>
                   Ainda não há histórico suficiente — a cada planilha enviada, um ponto novo é
@@ -499,11 +597,46 @@ export default function DashboardPage() {
             </section>
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
-              <h2 style={estilos.cardTitulo}>Evolução de peças por setor</h2>
+              <div style={estilos.cardTituloComFiltro}>
+                <TituloGrafico
+                  titulo="Evolução de peças por setor"
+                  dica="Como o volume parado em cada setor mudou dia a dia — mostra se um setor específico está acumulando fila."
+                />
+                <div style={estilos.filtroPeriodo}>
+                  <button
+                    onClick={() => setMostrarSeletorSetores((v) => !v)}
+                    style={estilos.botaoPreset}
+                  >
+                    Setores ({setoresParaExibirEvolucao.length}/{setoresNaEvolucao.length})
+                  </button>
+                  <FiltroPeriodo
+                    preset={presetEvolSetor}
+                    inicio={evolSetorInicio}
+                    fim={evolSetorFim}
+                    onPreset={mudarPresetEvolSetor}
+                    onInicio={setEvolSetorInicio}
+                    onFim={setEvolSetorFim}
+                  />
+                </div>
+              </div>
+              {mostrarSeletorSetores && (
+                <div style={estilos.seletorSetoresPainel}>
+                  {setoresNaEvolucao.map((setor) => (
+                    <label key={setor} style={estilos.seletorSetorItem}>
+                      <input
+                        type="checkbox"
+                        checked={setoresParaExibirEvolucao.includes(setor)}
+                        onChange={() => toggleSetorSelecionado(setor, setoresNaEvolucao)}
+                      />
+                      {setor}
+                    </label>
+                  ))}
+                </div>
+              )}
               {evolucaoPorSetor.length < 2 ? (
                 <p style={estilos.semDados}>
-                  Ainda não há histórico suficiente — a cada planilha enviada, um ponto novo é
-                  registrado aqui.
+                  Ainda não há histórico suficiente nesse período — a cada planilha enviada, um
+                  ponto novo é registrado aqui.
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height={340}>
@@ -513,12 +646,12 @@ export default function DashboardPage() {
                     <YAxis fontSize={11} />
                     <Tooltip formatter={(v) => Number(v).toLocaleString("pt-BR")} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {setoresNaEvolucao.map((setor, idx) => (
+                    {setoresParaExibirEvolucao.map((setor) => (
                       <Line
                         key={setor}
                         type="monotone"
                         dataKey={setor}
-                        stroke={CORES_SERIE[idx % CORES_SERIE.length]}
+                        stroke={CORES_SERIE[ORDEM_SETORES_GRAFICO.indexOf(setor) % CORES_SERIE.length] ?? "#64748b"}
                         strokeWidth={1.5}
                         dot={false}
                       />
@@ -530,7 +663,10 @@ export default function DashboardPage() {
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
               <div style={estilos.cardTituloComFiltro}>
-                <h2 style={estilos.cardTitulo}>Lead time (considera a data de saída do setor)</h2>
+                <TituloGrafico
+                  titulo="Lead time (considera a data de saída do setor)"
+                  dica="Quanto tempo, em média, uma OP fica em cada setor (e do início ao fim do processo) — mostra onde o fluxo está mais lento."
+                />
                 <FiltroPeriodo
                   preset={presetLead}
                   inicio={leadInicio}
@@ -568,21 +704,25 @@ export default function DashboardPage() {
                   {leadTimePorSetor.length === 0 ? (
                     <p style={estilos.semDados}>Nenhuma transição registrada nesse período.</p>
                   ) : (
-                    <ResponsiveContainer
-                      width="100%"
-                      height={Math.max(200, leadTimePorSetor.length * 34)}
-                    >
-                      <BarChart data={leadTimePorSetor} layout="vertical" margin={{ left: 24 }}>
-                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                        <XAxis type="number" fontSize={11} />
-                        <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+                    <ResponsiveContainer width="100%" height={320}>
+                      <BarChart data={ordenarPorSetor(leadTimePorSetor)} margin={{ bottom: 40 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                        <XAxis
+                          dataKey="setor"
+                          fontSize={10.5}
+                          angle={-35}
+                          textAnchor="end"
+                          interval={0}
+                          height={70}
+                        />
+                        <YAxis fontSize={11} />
                         <Tooltip
                           formatter={(v, _n, item) => [
                             `${Number(v).toFixed(1)} dias (${item.payload.amostras} amostras)`,
                             "Lead time",
                           ]}
                         />
-                        <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                        <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -592,7 +732,10 @@ export default function DashboardPage() {
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
               <div style={estilos.cardTituloComFiltro}>
-                <h2 style={estilos.cardTitulo}>Produção por setor no período</h2>
+                <TituloGrafico
+                  titulo="Produção por setor no período"
+                  dica='Quantas peças cada setor efetivamente concluiu ou avançou no período — mede produção real, não fila parada.'
+                />
                 <FiltroPeriodo
                   preset={presetProducao}
                   inicio={periodoInicio}
@@ -613,7 +756,7 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={producaoPeriodo} margin={{ bottom: 40 }}>
+                  <BarChart data={ordenarPorSetor(producaoPeriodo)} margin={{ bottom: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="setor"
@@ -638,7 +781,10 @@ export default function DashboardPage() {
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
               <div style={estilos.cardTituloComFiltro}>
-                <h2 style={estilos.cardTitulo}>Evolução diária de produção por setor</h2>
+                <TituloGrafico
+                  titulo="Evolução diária de produção por setor"
+                  dica="Como a produção diária de um setor específico variou dia a dia dentro do período."
+                />
                 <div style={estilos.filtroPeriodo}>
                   <label style={estilos.filtroPeriodoLabel}>
                     Setor
@@ -758,7 +904,30 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 14,
     fontWeight: 700,
     color: "#111827",
-    margin: "0 0 12px",
+    margin: 0,
+  },
+  dicaTexto: {
+    fontSize: 11.5,
+    color: "#9ca3af",
+    margin: "3px 0 12px",
+    lineHeight: 1.4,
+  },
+  seletorSetoresPainel: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 10,
+    background: "#f9fafb",
+    border: "1px solid #e5e7eb",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+  },
+  seletorSetorItem: {
+    fontSize: 11.5,
+    display: "flex",
+    alignItems: "center",
+    gap: 5,
+    color: "#374151",
   },
   cardTituloComFiltro: {
     display: "flex",

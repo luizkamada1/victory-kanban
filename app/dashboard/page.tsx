@@ -42,6 +42,90 @@ function formataDataCurta(iso: string): string {
   return `${dia}/${mes}`;
 }
 
+type PresetPeriodo = "hoje" | "semana" | "mes" | "mesPassado" | "personalizado";
+
+function calcularPeriodo(preset: PresetPeriodo): { inicio: string; fim: string } {
+  const hoje = new Date();
+  const hojeStr = hoje.toISOString().slice(0, 10);
+  if (preset === "hoje") return { inicio: hojeStr, fim: hojeStr };
+  if (preset === "semana") {
+    const diaSemana = hoje.getDay(); // 0 = domingo
+    const diffParaSegunda = diaSemana === 0 ? 6 : diaSemana - 1;
+    const segunda = new Date(hoje);
+    segunda.setDate(hoje.getDate() - diffParaSegunda);
+    return { inicio: segunda.toISOString().slice(0, 10), fim: hojeStr };
+  }
+  if (preset === "mes") {
+    const primeiro = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+    return { inicio: primeiro.toISOString().slice(0, 10), fim: hojeStr };
+  }
+  if (preset === "mesPassado") {
+    const primeiro = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+    const ultimo = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+    return { inicio: primeiro.toISOString().slice(0, 10), fim: ultimo.toISOString().slice(0, 10) };
+  }
+  return { inicio: hojeStr, fim: hojeStr }; // personalizado: valor inicial, depois o usuário ajusta
+}
+
+function FiltroPeriodo({
+  preset,
+  inicio,
+  fim,
+  onPreset,
+  onInicio,
+  onFim,
+}: {
+  preset: PresetPeriodo;
+  inicio: string;
+  fim: string;
+  onPreset: (p: PresetPeriodo) => void;
+  onInicio: (v: string) => void;
+  onFim: (v: string) => void;
+}) {
+  return (
+    <div style={estilos.filtroPeriodo}>
+      <label style={estilos.filtroPeriodoLabel}>
+        Período
+        <select
+          value={preset}
+          onChange={(e) => onPreset(e.target.value as PresetPeriodo)}
+          style={estilos.filtroPeriodoInput}
+        >
+          <option value="hoje">Hoje</option>
+          <option value="semana">Esta semana</option>
+          <option value="mes">Este mês</option>
+          <option value="mesPassado">Mês passado</option>
+          <option value="personalizado">Personalizado</option>
+        </select>
+      </label>
+      {preset === "personalizado" && (
+        <>
+          <label style={estilos.filtroPeriodoLabel}>
+            De
+            <input
+              type="date"
+              value={inicio}
+              max={fim}
+              onChange={(e) => onInicio(e.target.value)}
+              style={estilos.filtroPeriodoInput}
+            />
+          </label>
+          <label style={estilos.filtroPeriodoLabel}>
+            Até
+            <input
+              type="date"
+              value={fim}
+              min={inicio}
+              onChange={(e) => onFim(e.target.value)}
+              style={estilos.filtroPeriodoInput}
+            />
+          </label>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [capacidadeSetores, setCapacidadeSetores] = useState<Record<string, number>>({});
@@ -53,55 +137,54 @@ export default function DashboardPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
-  const [leadInicio, setLeadInicio] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [leadFim, setLeadFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [presetLead, setPresetLead] = useState<PresetPeriodo>("mes");
+  const [leadInicio, setLeadInicio] = useState(() => calcularPeriodo("mes").inicio);
+  const [leadFim, setLeadFim] = useState(() => calcularPeriodo("mes").fim);
   const [carregandoLead, setCarregandoLead] = useState(false);
   const [erroLead, setErroLead] = useState<string | null>(null);
 
-  function aplicarPresetLead(inicio: Date, fim: Date) {
-    setLeadInicio(inicio.toISOString().slice(0, 10));
-    setLeadFim(fim.toISOString().slice(0, 10));
-  }
-  function presetEsteMes() {
-    const hoje = new Date();
-    aplicarPresetLead(new Date(hoje.getFullYear(), hoje.getMonth(), 1), hoje);
-  }
-  function presetMesPassado() {
-    const hoje = new Date();
-    aplicarPresetLead(
-      new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1),
-      new Date(hoje.getFullYear(), hoje.getMonth(), 0)
-    );
+  function mudarPresetLead(p: PresetPeriodo) {
+    setPresetLead(p);
+    if (p === "personalizado") return;
+    const { inicio, fim } = calcularPeriodo(p);
+    setLeadInicio(inicio);
+    setLeadFim(fim);
   }
 
-  const [periodoInicio, setPeriodoInicio] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [periodoFim, setPeriodoFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [presetProducao, setPresetProducao] = useState<PresetPeriodo>("mes");
+  const [periodoInicio, setPeriodoInicio] = useState(() => calcularPeriodo("mes").inicio);
+  const [periodoFim, setPeriodoFim] = useState(() => calcularPeriodo("mes").fim);
   const [producaoPeriodo, setProducaoPeriodo] = useState<
     { setor: string; pecas: number; ops: number }[]
   >([]);
   const [carregandoProducao, setCarregandoProducao] = useState(false);
   const [erroProducao, setErroProducao] = useState<string | null>(null);
 
+  function mudarPresetProducao(p: PresetPeriodo) {
+    setPresetProducao(p);
+    if (p === "personalizado") return;
+    const { inicio, fim } = calcularPeriodo(p);
+    setPeriodoInicio(inicio);
+    setPeriodoFim(fim);
+  }
+
   const [setorEvolucao, setSetorEvolucao] = useState<string>(SETORES_ORDEM[0]);
-  const [evolucaoInicio, setEvolucaoInicio] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [evolucaoFim, setEvolucaoFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [presetEvolucao, setPresetEvolucao] = useState<PresetPeriodo>("mes");
+  const [evolucaoInicio, setEvolucaoInicio] = useState(() => calcularPeriodo("mes").inicio);
+  const [evolucaoFim, setEvolucaoFim] = useState(() => calcularPeriodo("mes").fim);
   const [producaoDiariaSetor, setProducaoDiariaSetor] = useState<{ data: string; pecas: number }[]>(
     []
   );
   const [carregandoProducaoDiaria, setCarregandoProducaoDiaria] = useState(false);
   const [erroProducaoDiaria, setErroProducaoDiaria] = useState<string | null>(null);
+
+  function mudarPresetEvolucao(p: PresetPeriodo) {
+    setPresetEvolucao(p);
+    if (p === "personalizado") return;
+    const { inicio, fim } = calcularPeriodo(p);
+    setEvolucaoInicio(inicio);
+    setEvolucaoFim(fim);
+  }
 
   useEffect(() => {
     (async () => {
@@ -448,34 +531,14 @@ export default function DashboardPage() {
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
               <div style={estilos.cardTituloComFiltro}>
                 <h2 style={estilos.cardTitulo}>Lead time (considera a data de saída do setor)</h2>
-                <div style={estilos.filtroPeriodo}>
-                  <button onClick={presetEsteMes} style={estilos.botaoPreset}>
-                    Este mês
-                  </button>
-                  <button onClick={presetMesPassado} style={estilos.botaoPreset}>
-                    Mês passado
-                  </button>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    De
-                    <input
-                      type="date"
-                      value={leadInicio}
-                      max={leadFim}
-                      onChange={(e) => setLeadInicio(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    Até
-                    <input
-                      type="date"
-                      value={leadFim}
-                      min={leadInicio}
-                      onChange={(e) => setLeadFim(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
-                </div>
+                <FiltroPeriodo
+                  preset={presetLead}
+                  inicio={leadInicio}
+                  fim={leadFim}
+                  onPreset={mudarPresetLead}
+                  onInicio={setLeadInicio}
+                  onFim={setLeadFim}
+                />
               </div>
 
               {erroLead ? (
@@ -530,28 +593,14 @@ export default function DashboardPage() {
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
               <div style={estilos.cardTituloComFiltro}>
                 <h2 style={estilos.cardTitulo}>Produção por setor no período</h2>
-                <div style={estilos.filtroPeriodo}>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    De
-                    <input
-                      type="date"
-                      value={periodoInicio}
-                      max={periodoFim}
-                      onChange={(e) => setPeriodoInicio(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    Até
-                    <input
-                      type="date"
-                      value={periodoFim}
-                      min={periodoInicio}
-                      onChange={(e) => setPeriodoFim(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
-                </div>
+                <FiltroPeriodo
+                  preset={presetProducao}
+                  inicio={periodoInicio}
+                  fim={periodoFim}
+                  onPreset={mudarPresetProducao}
+                  onInicio={setPeriodoInicio}
+                  onFim={setPeriodoFim}
+                />
               </div>
               {erroProducao ? (
                 <p style={estilos.semDados}>Erro: {erroProducao}</p>
@@ -605,26 +654,14 @@ export default function DashboardPage() {
                       ))}
                     </select>
                   </label>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    De
-                    <input
-                      type="date"
-                      value={evolucaoInicio}
-                      max={evolucaoFim}
-                      onChange={(e) => setEvolucaoInicio(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    Até
-                    <input
-                      type="date"
-                      value={evolucaoFim}
-                      min={evolucaoInicio}
-                      onChange={(e) => setEvolucaoFim(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    />
-                  </label>
+                  <FiltroPeriodo
+                    preset={presetEvolucao}
+                    inicio={evolucaoInicio}
+                    fim={evolucaoFim}
+                    onPreset={mudarPresetEvolucao}
+                    onInicio={setEvolucaoInicio}
+                    onFim={setEvolucaoFim}
+                  />
                 </div>
               </div>
               {erroProducaoDiaria ? (

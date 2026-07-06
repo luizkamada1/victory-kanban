@@ -151,8 +151,11 @@ export async function POST(req: NextRequest) {
       `${op}::${setor}::${oficina ?? ""}`;
     const chavesNovas = new Set(linhas.map((l) => chaveTransicao(l.op_numero, l.setor, l.oficina)));
     const opNumerosNovos = new Set(linhas.map((l) => l.op_numero));
+    const novaPorChave = new Map(
+      linhas.map((l) => [chaveTransicao(l.op_numero, l.setor, l.oficina), l])
+    );
 
-    const transicoes = (linhasAntigas ?? [])
+    const transicoesCompletas = (linhasAntigas ?? [])
       .filter((antiga) => !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina)))
       .map((antiga) => ({
         op_numero: antiga.op_numero,
@@ -164,6 +167,30 @@ export async function POST(req: NextRequest) {
         dias_uteis: diasUteisEntre(antiga.data_envio_fase, hoje),
         tipo: opNumerosNovos.has(antiga.op_numero) ? "avancou" : "concluiu",
       }));
+
+    // Transições parciais: a linha (op+setor+oficina) continua existindo, só que
+    // com menos peças do que antes — a diferença já saiu desse setor (avançou
+    // pra outro), mesmo sem a OP desaparecer inteira dali. Sem isso, mover só
+    // parte da quantidade de uma OP ficava invisível pro cálculo de produção.
+    const transicoesParciais = (linhasAntigas ?? [])
+      .map((antiga) => {
+        const chave = chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina);
+        const nova = novaPorChave.get(chave);
+        if (!nova || nova.quantidade >= antiga.quantidade) return null;
+        return {
+          op_numero: antiga.op_numero,
+          setor: antiga.setor,
+          oficina: antiga.oficina,
+          quantidade: antiga.quantidade - nova.quantidade,
+          data_entrada: antiga.data_envio_fase,
+          data_saida: hoje,
+          dias_uteis: diasUteisEntre(antiga.data_envio_fase, hoje),
+          tipo: "avancou",
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+
+    const transicoes = [...transicoesCompletas, ...transicoesParciais];
 
     if (transicoes.length > 0) {
       const { error: transicoesError } = await supabase.from("historico_transicoes").insert(transicoes);

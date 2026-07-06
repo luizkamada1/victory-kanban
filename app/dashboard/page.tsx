@@ -53,6 +53,18 @@ export default function DashboardPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  const [periodoInicio, setPeriodoInicio] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [periodoFim, setPeriodoFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [producaoPeriodo, setProducaoPeriodo] = useState<
+    { setor: string; pecas: number; ops: number }[]
+  >([]);
+  const [carregandoProducao, setCarregandoProducao] = useState(false);
+  const [erroProducao, setErroProducao] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -88,6 +100,26 @@ export default function DashboardPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      setCarregandoProducao(true);
+      setErroProducao(null);
+      try {
+        const resp = await fetch(
+          `/api/producao?inicio=${periodoInicio}&fim=${periodoFim}`,
+          { cache: "no-store" }
+        );
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao carregar produção do período");
+        setProducaoPeriodo(data.porSetor || []);
+      } catch (e: unknown) {
+        setErroProducao(e instanceof Error ? e.message : "Erro desconhecido");
+      } finally {
+        setCarregandoProducao(false);
+      }
+    })();
+  }, [periodoInicio, periodoFim]);
 
   const pecasPorSetor = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -380,6 +412,59 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               )}
             </section>
+
+            <section style={{ ...estilos.card, ...estilos.cardLargo }}>
+              <div style={estilos.cardTituloComFiltro}>
+                <h2 style={estilos.cardTitulo}>Produção por setor no período</h2>
+                <div style={estilos.filtroPeriodo}>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    De
+                    <input
+                      type="date"
+                      value={periodoInicio}
+                      max={periodoFim}
+                      onChange={(e) => setPeriodoInicio(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    />
+                  </label>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    Até
+                    <input
+                      type="date"
+                      value={periodoFim}
+                      min={periodoInicio}
+                      onChange={(e) => setPeriodoFim(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    />
+                  </label>
+                </div>
+              </div>
+              {erroProducao ? (
+                <p style={estilos.semDados}>Erro: {erroProducao}</p>
+              ) : carregandoProducao ? (
+                <p style={estilos.semDados}>Carregando...</p>
+              ) : producaoPeriodo.length === 0 ? (
+                <p style={estilos.semDados}>
+                  Nenhuma peça saiu de um setor nesse período (considera "produzido" toda peça que
+                  avançou pra outro setor ou concluiu o processo).
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(200, producaoPeriodo.length * 34)}>
+                  <BarChart data={producaoPeriodo} layout="vertical" margin={{ left: 24 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" fontSize={11} />
+                    <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+                    <Tooltip
+                      formatter={(v, _n, item) => [
+                        `${Number(v).toLocaleString("pt-BR")} pç (${item.payload.ops} OPs)`,
+                        "Produção",
+                      ]}
+                    />
+                    <Bar dataKey="pecas" name="Produção" fill="#16a34a" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </section>
           </div>
         )}
       </main>
@@ -448,6 +533,32 @@ const estilos: Record<string, React.CSSProperties> = {
     fontWeight: 700,
     color: "#111827",
     margin: "0 0 12px",
+  },
+  cardTituloComFiltro: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 12,
+  },
+  filtroPeriodo: {
+    display: "flex",
+    gap: 12,
+  },
+  filtroPeriodoLabel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 2,
+    fontSize: 11,
+    fontWeight: 600,
+    color: "#6b7280",
+  },
+  filtroPeriodoInput: {
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    padding: "5px 8px",
+    fontSize: 12.5,
   },
   semDados: {
     color: "#9ca3af",

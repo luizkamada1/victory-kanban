@@ -20,6 +20,26 @@ export function diasUteisEntre(inicio: Date | string | null, fim: Date | string)
   return dias;
 }
 
+// Conta dias úteis entre duas datas INCLUINDO os dois extremos — usado pra
+// saber quantos dias de capacidade produtiva existem num período (ex: "este
+// mês" tem N dias úteis, cada um vale a capacidade diária configurada).
+export function diasUteisNoPeriodo(inicio: string, fim: string): number {
+  const dataInicio = new Date(inicio);
+  dataInicio.setHours(0, 0, 0, 0);
+  const dataFim = new Date(fim);
+  dataFim.setHours(0, 0, 0, 0);
+  if (dataFim < dataInicio) return 0;
+
+  let dias = 0;
+  const cursor = new Date(dataInicio);
+  while (cursor <= dataFim) {
+    const diaSemana = cursor.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) dias++;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dias;
+}
+
 export function diasNoSetor(dataEnvioFase: string | null): number | null {
   if (!dataEnvioFase) return null;
   return diasUteisEntre(dataEnvioFase, new Date());

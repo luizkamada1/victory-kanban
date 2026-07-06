@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BarChart,
+  ComposedChart,
   Bar,
   Cell,
   XAxis,
@@ -16,7 +17,7 @@ import {
 } from "recharts";
 import type { OP } from "@/lib/types";
 import { SETORES_ORDEM } from "@/lib/setores";
-import { diasNoSetor, corOcupacao, abreviaOficina } from "@/lib/kanban-utils";
+import { diasNoSetor, corOcupacao, abreviaOficina, diasUteisNoPeriodo } from "@/lib/kanban-utils";
 
 type HistoricoLinha = { data: string; setor: string; total_ops: number; total_pecas: number };
 type LeadTimeSetor = { setor: string; mediaDias: number; amostras: number };
@@ -347,6 +348,28 @@ export default function DashboardPage() {
       }
     })();
   }, [periodoInicio, periodoFim]);
+
+  const diasUteisProducao = useMemo(
+    () => diasUteisNoPeriodo(periodoInicio, periodoFim),
+    [periodoInicio, periodoFim]
+  );
+
+  const capacidadeOficinasTotal = useMemo(
+    () => Object.values(capacidadeOficinas).reduce((acc, v) => acc + v, 0),
+    [capacidadeOficinas]
+  );
+
+  const producaoComCapacidade = useMemo(() => {
+    return ordenarPorSetor(producaoPeriodo).map((entrada) => {
+      const capacidadeDiaria =
+        entrada.setor === "COSTURA EXTERNA"
+          ? capacidadeOficinasTotal
+          : capacidadeSetores[entrada.setor] ?? 0;
+      const capacidadeEsperada =
+        capacidadeDiaria > 0 ? capacidadeDiaria * diasUteisProducao : null;
+      return { ...entrada, capacidadeEsperada };
+    });
+  }, [producaoPeriodo, capacidadeSetores, capacidadeOficinasTotal, diasUteisProducao]);
 
   const setoresEvolucaoDiariaChave = Array.from(setoresEvolucaoDiaria).sort().join(",");
 
@@ -802,7 +825,7 @@ export default function DashboardPage() {
               <div style={estilos.cardTituloComFiltro}>
                 <TituloGrafico
                   titulo="Produção por setor no período"
-                  dica='Quantas peças cada setor efetivamente concluiu ou avançou no período — mede produção real, não fila parada.'
+                  dica={`Quantas peças cada setor efetivamente concluiu ou avançou no período, comparado com a capacidade esperada (capacidade diária × ${diasUteisProducao} ${diasUteisProducao === 1 ? "dia útil" : "dias úteis"} no período) — a linha tracejada marca esse teto.`}
                 />
                 <FiltroPeriodo
                   preset={presetProducao}
@@ -824,7 +847,7 @@ export default function DashboardPage() {
                 </p>
               ) : (
                 <ResponsiveContainer width="100%" height={320}>
-                  <BarChart data={ordenarPorSetor(producaoPeriodo)} margin={{ bottom: 40 }}>
+                  <ComposedChart data={producaoComCapacidade} margin={{ bottom: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis
                       dataKey="setor"
@@ -836,17 +859,38 @@ export default function DashboardPage() {
                     />
                     <YAxis fontSize={11} />
                     <Tooltip
-                      formatter={(v, _n, item) => [
-                        `${Number(v).toLocaleString("pt-BR")} pç (${item.payload.ops} OPs)`,
-                        "Produção",
-                      ]}
+                      formatter={(v, _n, item) => {
+                        if (item.dataKey === "capacidadeEsperada") {
+                          return [
+                            v === null
+                              ? "sem capacidade configurada"
+                              : `${Number(v).toLocaleString("pt-BR")} pç`,
+                            "Capacidade esperada",
+                          ];
+                        }
+                        return [
+                          `${Number(v).toLocaleString("pt-BR")} pç (${item.payload.ops} OPs)`,
+                          "Produção",
+                        ];
+                      }}
                     />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
                     <Bar dataKey="pecas" name="Produção" radius={[4, 4, 0, 0]}>
-                      {ordenarPorSetor(producaoPeriodo).map((entrada, idx) => (
+                      {producaoComCapacidade.map((entrada, idx) => (
                         <Cell key={idx} fill={corDoSetor(entrada.setor)} />
                       ))}
                     </Bar>
-                  </BarChart>
+                    <Line
+                      type="monotone"
+                      dataKey="capacidadeEsperada"
+                      name="Capacidade esperada"
+                      stroke="#111827"
+                      strokeDasharray="5 4"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                      connectNulls
+                    />
+                  </ComposedChart>
                 </ResponsiveContainer>
               )}
             </section>

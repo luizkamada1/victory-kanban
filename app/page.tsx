@@ -182,9 +182,6 @@ export default function KanbanPage() {
             >
               Setores visíveis
             </button>
-            <button onClick={atualizarTudo} style={estilos.botao}>
-              ↻ Atualizar
-            </button>
             <a href="/dashboard" style={estilos.botao}>
               Dashboard
             </a>

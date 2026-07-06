@@ -53,6 +53,31 @@ export default function DashboardPage() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
+  const [leadInicio, setLeadInicio] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [leadFim, setLeadFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [carregandoLead, setCarregandoLead] = useState(false);
+  const [erroLead, setErroLead] = useState<string | null>(null);
+
+  function aplicarPresetLead(inicio: Date, fim: Date) {
+    setLeadInicio(inicio.toISOString().slice(0, 10));
+    setLeadFim(fim.toISOString().slice(0, 10));
+  }
+  function presetEsteMes() {
+    const hoje = new Date();
+    aplicarPresetLead(new Date(hoje.getFullYear(), hoje.getMonth(), 1), hoje);
+  }
+  function presetMesPassado() {
+    const hoje = new Date();
+    aplicarPresetLead(
+      new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1),
+      new Date(hoje.getFullYear(), hoje.getMonth(), 0)
+    );
+  }
+
   const [periodoInicio, setPeriodoInicio] = useState(() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
@@ -81,11 +106,10 @@ export default function DashboardPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [opsResp, capResp, histResp, leadResp] = await Promise.all([
+        const [opsResp, capResp, histResp] = await Promise.all([
           fetch("/api/ops", { cache: "no-store" }),
           fetch("/api/capacidade", { cache: "no-store" }),
           fetch("/api/historico", { cache: "no-store" }),
-          fetch("/api/leadtime", { cache: "no-store" }),
         ]);
         const opsData = await opsResp.json();
         if (!opsResp.ok) throw new Error(opsData.error || "Erro ao carregar OPs");
@@ -99,13 +123,6 @@ export default function DashboardPage() {
 
         const histData = await histResp.json();
         if (histResp.ok) setHistorico(histData.historico || []);
-
-        const leadData = await leadResp.json();
-        if (leadResp.ok) {
-          setLeadTimePorSetor(leadData.leadTimePorSetor || []);
-          setLeadTimeGeral(leadData.leadTimeGeral);
-          setAmostrasGeral(leadData.amostrasGeral || 0);
-        }
       } catch (e: unknown) {
         setErro(e instanceof Error ? e.message : "Erro desconhecido");
       } finally {
@@ -113,6 +130,27 @@ export default function DashboardPage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      setCarregandoLead(true);
+      setErroLead(null);
+      try {
+        const resp = await fetch(`/api/leadtime?inicio=${leadInicio}&fim=${leadFim}`, {
+          cache: "no-store",
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao carregar lead time");
+        setLeadTimePorSetor(data.leadTimePorSetor || []);
+        setLeadTimeGeral(data.leadTimeGeral);
+        setAmostrasGeral(data.amostrasGeral || 0);
+      } catch (e: unknown) {
+        setErroLead(e instanceof Error ? e.message : "Erro desconhecido");
+      } finally {
+        setCarregandoLead(false);
+      }
+    })();
+  }, [leadInicio, leadFim]);
 
   useEffect(() => {
     (async () => {
@@ -408,46 +446,84 @@ export default function DashboardPage() {
             </section>
 
             <section style={{ ...estilos.card, ...estilos.cardLargo }}>
-              <h2 style={estilos.cardTitulo}>Lead time geral (fim a fim)</h2>
-              {leadTimeGeral === null ? (
-                <p style={estilos.semDados}>
-                  Ainda não há nenhuma OP com todo o trajeto rastreado — isso vai se acumulando
-                  conforme as OPs concluem o processo a partir de agora.
-                </p>
-              ) : (
-                <div style={estilos.kpi}>
-                  <span style={estilos.kpiValor}>{leadTimeGeral.toFixed(1)}</span>
-                  <span style={estilos.kpiLabel}>
-                    dias úteis em média, da primeira entrada registrada até a conclusão
-                    <br />({amostrasGeral} OP{amostrasGeral === 1 ? "" : "s"} concluída
-                    {amostrasGeral === 1 ? "" : "s"} rastreada{amostrasGeral === 1 ? "" : "s"})
-                  </span>
-                </div>
-              )}
-            </section>
-
-            <section style={{ ...estilos.card, ...estilos.cardLargo }}>
-              <h2 style={estilos.cardTitulo}>Lead time médio por setor (dias úteis)</h2>
-              {leadTimePorSetor.length === 0 ? (
-                <p style={estilos.semDados}>
-                  Ainda não há transições registradas — a cada upload, o que mudou de setor desde o
-                  envio anterior entra nessa conta.
-                </p>
-              ) : (
-                <ResponsiveContainer width="100%" height={Math.max(200, leadTimePorSetor.length * 34)}>
-                  <BarChart data={leadTimePorSetor} layout="vertical" margin={{ left: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" fontSize={11} />
-                    <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
-                    <Tooltip
-                      formatter={(v, _n, item) => [
-                        `${Number(v).toFixed(1)} dias (${item.payload.amostras} amostras)`,
-                        "Lead time",
-                      ]}
+              <div style={estilos.cardTituloComFiltro}>
+                <h2 style={estilos.cardTitulo}>Lead time (considera a data de saída do setor)</h2>
+                <div style={estilos.filtroPeriodo}>
+                  <button onClick={presetEsteMes} style={estilos.botaoPreset}>
+                    Este mês
+                  </button>
+                  <button onClick={presetMesPassado} style={estilos.botaoPreset}>
+                    Mês passado
+                  </button>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    De
+                    <input
+                      type="date"
+                      value={leadInicio}
+                      max={leadFim}
+                      onChange={(e) => setLeadInicio(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
                     />
-                    <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                  </label>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    Até
+                    <input
+                      type="date"
+                      value={leadFim}
+                      min={leadInicio}
+                      onChange={(e) => setLeadFim(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {erroLead ? (
+                <p style={estilos.semDados}>Erro: {erroLead}</p>
+              ) : carregandoLead ? (
+                <p style={estilos.semDados}>Carregando...</p>
+              ) : (
+                <>
+                  <h3 style={estilos.subTitulo}>Geral (fim a fim)</h3>
+                  {leadTimeGeral === null ? (
+                    <p style={estilos.semDados}>
+                      Nenhuma OP concluiu todo o trajeto nesse período (isso vai se acumulando
+                      conforme as OPs vão terminando).
+                    </p>
+                  ) : (
+                    <div style={estilos.kpi}>
+                      <span style={estilos.kpiValor}>{leadTimeGeral.toFixed(1)}</span>
+                      <span style={estilos.kpiLabel}>
+                        dias úteis em média, da primeira entrada registrada até a conclusão
+                        <br />({amostrasGeral} OP{amostrasGeral === 1 ? "" : "s"} concluída
+                        {amostrasGeral === 1 ? "" : "s"} nesse período)
+                      </span>
+                    </div>
+                  )}
+
+                  <h3 style={estilos.subTitulo}>Médio por setor (dias úteis)</h3>
+                  {leadTimePorSetor.length === 0 ? (
+                    <p style={estilos.semDados}>Nenhuma transição registrada nesse período.</p>
+                  ) : (
+                    <ResponsiveContainer
+                      width="100%"
+                      height={Math.max(200, leadTimePorSetor.length * 34)}
+                    >
+                      <BarChart data={leadTimePorSetor} layout="vertical" margin={{ left: 24 }}>
+                        <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                        <XAxis type="number" fontSize={11} />
+                        <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+                        <Tooltip
+                          formatter={(v, _n, item) => [
+                            `${Number(v).toFixed(1)} dias (${item.payload.amostras} amostras)`,
+                            "Lead time",
+                          ]}
+                        />
+                        <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </>
               )}
             </section>
 
@@ -672,6 +748,23 @@ const estilos: Record<string, React.CSSProperties> = {
     borderRadius: 6,
     padding: "5px 8px",
     fontSize: 12.5,
+  },
+  botaoPreset: {
+    alignSelf: "flex-end",
+    background: "#f3f4f6",
+    border: "1px solid #d1d5db",
+    borderRadius: 6,
+    padding: "6px 10px",
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#374151",
+    cursor: "pointer",
+  },
+  subTitulo: {
+    fontSize: 12.5,
+    fontWeight: 700,
+    color: "#4b5563",
+    margin: "16px 0 8px",
   },
   semDados: {
     color: "#9ca3af",

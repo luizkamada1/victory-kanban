@@ -164,6 +164,9 @@ export default function KanbanPage() {
             <button onClick={atualizarTudo} style={estilos.botao}>
               ↻ Atualizar
             </button>
+            <a href="/dashboard" style={estilos.botao}>
+              Dashboard
+            </a>
             <a href="/capacidade" style={estilos.botao}>
               Capacidade
             </a>

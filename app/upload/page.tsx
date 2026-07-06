@@ -51,6 +51,9 @@ export default function UploadPage() {
             <a href="/" style={estilos.botao}>
               ← Kanban
             </a>
+            <a href="/dashboard" style={estilos.botao}>
+              Dashboard
+            </a>
             <a href="/capacidade" style={estilos.botao}>
               Capacidade
             </a>

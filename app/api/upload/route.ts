@@ -115,6 +115,26 @@ export async function POST(req: NextRequest) {
     const { error: insertError } = await supabase.from("producao_ops").insert(linhas);
     if (insertError) throw insertError;
 
+    // Guarda um snapshot agregado do dia (por setor) pros gráficos de evolução do dashboard
+    const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+    const porSetor = new Map<string, { ops: Set<string>; pecas: number }>();
+    for (const linha of linhas) {
+      const atual = porSetor.get(linha.setor) ?? { ops: new Set<string>(), pecas: 0 };
+      atual.ops.add(linha.op_numero);
+      atual.pecas += linha.quantidade;
+      porSetor.set(linha.setor, atual);
+    }
+    const linhasHistorico = Array.from(porSetor.entries()).map(([setor, { ops, pecas }]) => ({
+      data: hoje,
+      setor,
+      total_ops: ops.size,
+      total_pecas: pecas,
+    }));
+    const { error: historicoError } = await supabase
+      .from("historico_diario")
+      .upsert(linhasHistorico, { onConflict: "data,setor" });
+    if (historicoError) throw historicoError;
+
     return NextResponse.json({ ok: true, total_ops: linhas.length });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Erro desconhecido";

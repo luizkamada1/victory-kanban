@@ -74,6 +74,9 @@ export default function CapacidadePage() {
             <a href="/" style={estilos.botao}>
               ← Kanban
             </a>
+            <a href="/dashboard" style={estilos.botao}>
+              Dashboard
+            </a>
             <a href="/upload" style={estilos.botao}>
               Enviar planilha
             </a>

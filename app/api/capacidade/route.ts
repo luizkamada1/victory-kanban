@@ -52,6 +52,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const setores: Record<string, number> = body.setores ?? {};
     const oficinas: Record<string, number> = body.oficinas ?? {};
+    const remover: string[] = Array.isArray(body.remover) ? body.remover : [];
 
     const supabase = getSupabaseServer();
 
@@ -72,6 +73,10 @@ export async function POST(req: NextRequest) {
     }
     if (linhasOficinas.length > 0) {
       const { error } = await supabase.from("capacidade_oficinas").upsert(linhasOficinas, { onConflict: "oficina" });
+      if (error) throw error;
+    }
+    if (remover.length > 0) {
+      const { error } = await supabase.from("capacidade_oficinas").delete().in("oficina", remover);
       if (error) throw error;
     }
 

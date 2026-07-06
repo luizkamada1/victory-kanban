@@ -6,6 +6,7 @@ import { SETORES_COM_CAPACIDADE } from "@/lib/setores";
 export default function CapacidadePage() {
   const [setores, setSetores] = useState<Record<string, number>>({});
   const [oficinas, setOficinas] = useState<Record<string, number>>({});
+  const [oficinasRemovidas, setOficinasRemovidas] = useState<Set<string>>(new Set());
   const [novaOficina, setNovaOficina] = useState("");
   const [carregando, setCarregando] = useState(true);
   const [salvando, setSalvando] = useState(false);
@@ -36,10 +37,11 @@ export default function CapacidadePage() {
       const resp = await fetch("/api/capacidade", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ setores, oficinas }),
+        body: JSON.stringify({ setores, oficinas, remover: Array.from(oficinasRemovidas) }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Erro ao salvar");
+      setOficinasRemovidas(new Set());
       setSucesso(true);
       setTimeout(() => setSucesso(false), 3000);
     } catch (e: unknown) {
@@ -60,7 +62,10 @@ export default function CapacidadePage() {
     const copia = { ...oficinas };
     delete copia[nome];
     setOficinas(copia);
+    setOficinasRemovidas((atual) => new Set(atual).add(nome));
   }
+
+  const somaCapacidadeOficinas = Object.values(oficinas).reduce((acc, v) => acc + (Number(v) || 0), 0);
 
   return (
     <div style={{ minHeight: "100vh" }}>
@@ -113,10 +118,16 @@ export default function CapacidadePage() {
             </section>
 
             <section style={estilos.secao}>
-              <h2 style={estilos.secaoTitulo}>Capacidade por oficina (Costura Externa)</h2>
+              <div style={estilos.secaoTituloComResumo}>
+                <h2 style={estilos.secaoTitulo}>Capacidade por oficina (Costura Externa)</h2>
+                <span style={estilos.somaBadge}>
+                  Soma: {somaCapacidadeOficinas.toLocaleString("pt-BR")} pç/dia
+                </span>
+              </div>
               <p style={estilos.secaoDescricao}>
                 As oficinas detectadas nas planilhas enviadas aparecem automaticamente abaixo.
-                Você também pode adicionar uma oficina manualmente.
+                Você também pode adicionar uma oficina manualmente. Remover uma oficina só tem
+                efeito depois de clicar em &quot;Salvar capacidades&quot;.
               </p>
               <div style={estilos.grade}>
                 {Object.keys(oficinas)
@@ -229,6 +240,21 @@ const estilos: Record<string, React.CSSProperties> = {
     marginBottom: 20,
   },
   secaoTitulo: { fontSize: 15, fontWeight: 700, margin: "0 0 4px", color: "#111827" },
+  secaoTituloComResumo: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  somaBadge: {
+    background: "#eef2ff",
+    color: "#4338ca",
+    fontSize: 12.5,
+    fontWeight: 700,
+    padding: "3px 10px",
+    borderRadius: 999,
+  },
   secaoDescricao: { fontSize: 12.5, color: "#6b7280", margin: "0 0 14px" },
   grade: {
     display: "grid",

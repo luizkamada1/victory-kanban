@@ -19,6 +19,7 @@ import { SETORES_ORDEM, SETORES_COM_CAPACIDADE } from "@/lib/setores";
 import { diasNoSetor, corOcupacao, abreviaOficina } from "@/lib/kanban-utils";
 
 type HistoricoLinha = { data: string; setor: string; total_ops: number; total_pecas: number };
+type LeadTimeSetor = { setor: string; mediaDias: number; amostras: number };
 
 const CORES_SERIE = [
   "#6366f1",
@@ -46,16 +47,20 @@ export default function DashboardPage() {
   const [capacidadeSetores, setCapacidadeSetores] = useState<Record<string, number>>({});
   const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
   const [historico, setHistorico] = useState<HistoricoLinha[]>([]);
+  const [leadTimePorSetor, setLeadTimePorSetor] = useState<LeadTimeSetor[]>([]);
+  const [leadTimeGeral, setLeadTimeGeral] = useState<number | null>(null);
+  const [amostrasGeral, setAmostrasGeral] = useState(0);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [opsResp, capResp, histResp] = await Promise.all([
+        const [opsResp, capResp, histResp, leadResp] = await Promise.all([
           fetch("/api/ops", { cache: "no-store" }),
           fetch("/api/capacidade", { cache: "no-store" }),
           fetch("/api/historico", { cache: "no-store" }),
+          fetch("/api/leadtime", { cache: "no-store" }),
         ]);
         const opsData = await opsResp.json();
         if (!opsResp.ok) throw new Error(opsData.error || "Erro ao carregar OPs");
@@ -69,6 +74,13 @@ export default function DashboardPage() {
 
         const histData = await histResp.json();
         if (histResp.ok) setHistorico(histData.historico || []);
+
+        const leadData = await leadResp.json();
+        if (leadResp.ok) {
+          setLeadTimePorSetor(leadData.leadTimePorSetor || []);
+          setLeadTimeGeral(leadData.leadTimeGeral);
+          setAmostrasGeral(leadData.amostrasGeral || 0);
+        }
       } catch (e: unknown) {
         setErro(e instanceof Error ? e.message : "Erro desconhecido");
       } finally {
@@ -324,6 +336,50 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               )}
             </section>
+
+            <section style={{ ...estilos.card, ...estilos.cardLargo }}>
+              <h2 style={estilos.cardTitulo}>Lead time geral (fim a fim)</h2>
+              {leadTimeGeral === null ? (
+                <p style={estilos.semDados}>
+                  Ainda não há nenhuma OP com todo o trajeto rastreado — isso vai se acumulando
+                  conforme as OPs concluem o processo a partir de agora.
+                </p>
+              ) : (
+                <div style={estilos.kpi}>
+                  <span style={estilos.kpiValor}>{leadTimeGeral.toFixed(1)}</span>
+                  <span style={estilos.kpiLabel}>
+                    dias úteis em média, da primeira entrada registrada até a conclusão
+                    <br />({amostrasGeral} OP{amostrasGeral === 1 ? "" : "s"} concluída
+                    {amostrasGeral === 1 ? "" : "s"} rastreada{amostrasGeral === 1 ? "" : "s"})
+                  </span>
+                </div>
+              )}
+            </section>
+
+            <section style={{ ...estilos.card, ...estilos.cardLargo }}>
+              <h2 style={estilos.cardTitulo}>Lead time médio por setor (dias úteis)</h2>
+              {leadTimePorSetor.length === 0 ? (
+                <p style={estilos.semDados}>
+                  Ainda não há transições registradas — a cada upload, o que mudou de setor desde o
+                  envio anterior entra nessa conta.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={Math.max(200, leadTimePorSetor.length * 34)}>
+                  <BarChart data={leadTimePorSetor} layout="vertical" margin={{ left: 24 }}>
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                    <XAxis type="number" fontSize={11} />
+                    <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+                    <Tooltip
+                      formatter={(v, _n, item) => [
+                        `${Number(v).toFixed(1)} dias (${item.payload.amostras} amostras)`,
+                        "Lead time",
+                      ]}
+                    />
+                    <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[0, 4, 4, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </section>
           </div>
         )}
       </main>
@@ -398,5 +454,22 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 12.5,
     textAlign: "center",
     padding: "40px 10px",
+  },
+  kpi: {
+    display: "flex",
+    alignItems: "baseline",
+    gap: 14,
+    padding: "20px 10px",
+  },
+  kpiValor: {
+    fontSize: 42,
+    fontWeight: 800,
+    color: "#0ea5e9",
+    lineHeight: 1,
+  },
+  kpiLabel: {
+    fontSize: 12.5,
+    color: "#6b7280",
+    lineHeight: 1.4,
   },
 };

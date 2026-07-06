@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSupabaseServer } from "@/lib/supabase";
+import { diasUteisEntre } from "@/lib/kanban-utils";
 
 export const runtime = "nodejs";
 
@@ -108,6 +109,13 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseServer();
 
+    // Lê o snapshot anterior ANTES de sobrescrever, pra detectar o que mudou de
+    // setor (ou saiu do processo de vez) e alimentar o histórico de lead time.
+    const { data: linhasAntigas, error: antigasError } = await supabase
+      .from("producao_ops")
+      .select("op_numero, setor, oficina, quantidade, data_envio_fase");
+    if (antigasError) throw antigasError;
+
     // Substitui todo o snapshot anterior pelo novo
     const { error: deleteError } = await supabase.from("producao_ops").delete().neq("op_numero", "");
     if (deleteError) throw deleteError;
@@ -134,6 +142,33 @@ export async function POST(req: NextRequest) {
       .from("historico_diario")
       .upsert(linhasHistorico, { onConflict: "data,setor" });
     if (historicoError) throw historicoError;
+
+    // Detecta transições: uma linha antiga (op+setor+oficina) que não existe mais
+    // no snapshot novo significa que aquele lote saiu daquele setor — ou porque
+    // avançou pra outro setor (a OP ainda aparece em algum lugar), ou porque
+    // concluiu e saiu do processo de vez (a OP não aparece em nenhum setor mais).
+    const chaveTransicao = (op: string, setor: string, oficina: string | null) =>
+      `${op}::${setor}::${oficina ?? ""}`;
+    const chavesNovas = new Set(linhas.map((l) => chaveTransicao(l.op_numero, l.setor, l.oficina)));
+    const opNumerosNovos = new Set(linhas.map((l) => l.op_numero));
+
+    const transicoes = (linhasAntigas ?? [])
+      .filter((antiga) => !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina)))
+      .map((antiga) => ({
+        op_numero: antiga.op_numero,
+        setor: antiga.setor,
+        oficina: antiga.oficina,
+        quantidade: antiga.quantidade,
+        data_entrada: antiga.data_envio_fase,
+        data_saida: hoje,
+        dias_uteis: diasUteisEntre(antiga.data_envio_fase, hoje),
+        tipo: opNumerosNovos.has(antiga.op_numero) ? "avancou" : "concluiu",
+      }));
+
+    if (transicoes.length > 0) {
+      const { error: transicoesError } = await supabase.from("historico_transicoes").insert(transicoes);
+      if (transicoesError) throw transicoesError;
+    }
 
     return NextResponse.json({ ok: true, total_ops: linhas.length });
   } catch (err: unknown) {

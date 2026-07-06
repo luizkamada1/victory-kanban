@@ -65,6 +65,19 @@ export default function DashboardPage() {
   const [carregandoProducao, setCarregandoProducao] = useState(false);
   const [erroProducao, setErroProducao] = useState<string | null>(null);
 
+  const [setorEvolucao, setSetorEvolucao] = useState<string>(SETORES_ORDEM[0]);
+  const [evolucaoInicio, setEvolucaoInicio] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [evolucaoFim, setEvolucaoFim] = useState(() => new Date().toISOString().slice(0, 10));
+  const [producaoDiariaSetor, setProducaoDiariaSetor] = useState<{ data: string; pecas: number }[]>(
+    []
+  );
+  const [carregandoProducaoDiaria, setCarregandoProducaoDiaria] = useState(false);
+  const [erroProducaoDiaria, setErroProducaoDiaria] = useState<string | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
@@ -120,6 +133,31 @@ export default function DashboardPage() {
       }
     })();
   }, [periodoInicio, periodoFim]);
+
+  useEffect(() => {
+    (async () => {
+      setCarregandoProducaoDiaria(true);
+      setErroProducaoDiaria(null);
+      try {
+        const resp = await fetch(
+          `/api/producao-diaria?setor=${encodeURIComponent(setorEvolucao)}&inicio=${evolucaoInicio}&fim=${evolucaoFim}`,
+          { cache: "no-store" }
+        );
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao carregar evolução do setor");
+        setProducaoDiariaSetor(
+          (data.pontos || []).map((p: { data: string; pecas: number }) => ({
+            data: formataDataCurta(p.data),
+            pecas: p.pecas,
+          }))
+        );
+      } catch (e: unknown) {
+        setErroProducaoDiaria(e instanceof Error ? e.message : "Erro desconhecido");
+      } finally {
+        setCarregandoProducaoDiaria(false);
+      }
+    })();
+  }, [setorEvolucao, evolucaoInicio, evolucaoFim]);
 
   const pecasPorSetor = useMemo(() => {
     const mapa = new Map<string, number>();
@@ -449,19 +487,94 @@ export default function DashboardPage() {
                   avançou pra outro setor ou concluiu o processo).
                 </p>
               ) : (
-                <ResponsiveContainer width="100%" height={Math.max(200, producaoPeriodo.length * 34)}>
-                  <BarChart data={producaoPeriodo} layout="vertical" margin={{ left: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" fontSize={11} />
-                    <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+                <ResponsiveContainer width="100%" height={320}>
+                  <BarChart data={producaoPeriodo} margin={{ bottom: 40 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis
+                      dataKey="setor"
+                      fontSize={10.5}
+                      angle={-35}
+                      textAnchor="end"
+                      interval={0}
+                      height={70}
+                    />
+                    <YAxis fontSize={11} />
                     <Tooltip
                       formatter={(v, _n, item) => [
                         `${Number(v).toLocaleString("pt-BR")} pç (${item.payload.ops} OPs)`,
                         "Produção",
                       ]}
                     />
-                    <Bar dataKey="pecas" name="Produção" fill="#16a34a" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="pecas" name="Produção" fill="#16a34a" radius={[4, 4, 0, 0]} />
                   </BarChart>
+                </ResponsiveContainer>
+              )}
+            </section>
+
+            <section style={{ ...estilos.card, ...estilos.cardLargo }}>
+              <div style={estilos.cardTituloComFiltro}>
+                <h2 style={estilos.cardTitulo}>Evolução diária de produção por setor</h2>
+                <div style={estilos.filtroPeriodo}>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    Setor
+                    <select
+                      value={setorEvolucao}
+                      onChange={(e) => setSetorEvolucao(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    >
+                      {SETORES_ORDEM.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    De
+                    <input
+                      type="date"
+                      value={evolucaoInicio}
+                      max={evolucaoFim}
+                      onChange={(e) => setEvolucaoInicio(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    />
+                  </label>
+                  <label style={estilos.filtroPeriodoLabel}>
+                    Até
+                    <input
+                      type="date"
+                      value={evolucaoFim}
+                      min={evolucaoInicio}
+                      onChange={(e) => setEvolucaoFim(e.target.value)}
+                      style={estilos.filtroPeriodoInput}
+                    />
+                  </label>
+                </div>
+              </div>
+              {erroProducaoDiaria ? (
+                <p style={estilos.semDados}>Erro: {erroProducaoDiaria}</p>
+              ) : carregandoProducaoDiaria ? (
+                <p style={estilos.semDados}>Carregando...</p>
+              ) : producaoDiariaSetor.length === 0 ? (
+                <p style={estilos.semDados}>
+                  Nenhuma peça saiu de {setorEvolucao} nesse período.
+                </p>
+              ) : (
+                <ResponsiveContainer width="100%" height={280}>
+                  <LineChart data={producaoDiariaSetor}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="data" fontSize={11} />
+                    <YAxis fontSize={11} />
+                    <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
+                    <Line
+                      type="monotone"
+                      dataKey="pecas"
+                      name="Produção"
+                      stroke="#16a34a"
+                      strokeWidth={2}
+                      dot={{ r: 3 }}
+                    />
+                  </LineChart>
                 </ResponsiveContainer>
               )}
             </section>

@@ -9,6 +9,17 @@ import { KanbanColuna } from "@/components/KanbanColuna";
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutos
 const STORAGE_KEY = "victory_kanban_setores_visiveis";
 
+function formataUltimaAtualizacao(data: Date): string {
+  const hoje = new Date();
+  const éHoje =
+    data.getFullYear() === hoje.getFullYear() &&
+    data.getMonth() === hoje.getMonth() &&
+    data.getDate() === hoje.getDate();
+  const hora = data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  if (éHoje) return `hoje às ${hora}`;
+  return `em ${data.toLocaleDateString("pt-BR")} às ${hora}`;
+}
+
 export default function KanbanPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +58,17 @@ export default function KanbanPage() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Erro ao carregar dados");
       setOps(data.ops);
-      setUltimaAtualizacao(new Date());
+      // "Atualizado às" reflete o último upload de planilha (created_at das OPs),
+      // não o momento em que o navegador buscou os dados.
+      const opsRecebidas: OP[] = data.ops;
+      if (opsRecebidas.length > 0) {
+        const maisRecente = opsRecebidas.reduce((acc, op) =>
+          new Date(op.created_at) > new Date(acc.created_at) ? op : acc
+        );
+        setUltimaAtualizacao(new Date(maisRecente.created_at));
+      } else {
+        setUltimaAtualizacao(null);
+      }
       setErro(null);
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : "Erro desconhecido");
@@ -199,7 +220,7 @@ export default function KanbanPage() {
             {ultimaAtualizacao && (
               <span style={{ color: "#9ca3af" }}>
                 {" "}
-                · atualizado às {ultimaAtualizacao.toLocaleTimeString("pt-BR")}
+                · última planilha enviada {formataUltimaAtualizacao(ultimaAtualizacao)}
               </span>
             )}
           </p>

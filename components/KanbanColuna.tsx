@@ -141,6 +141,9 @@ export function KanbanColuna({
               </span>
               {ocupacao >= 100 && <span style={{ fontSize: 12 }}>⚠️</span>}
             </div>
+            <span style={estilos.capacidadeDiaria}>
+              Capacidade: {capacidadeSetor!.toLocaleString("pt-BR")} pç/dia
+            </span>
             <div style={estilos.capacidadeBarraFundo}>
               <div
                 style={{
@@ -299,6 +302,13 @@ const estilos: Record<string, React.CSSProperties> = {
     height: "100%",
     borderRadius: 999,
     transition: "width 0.2s",
+  },
+  capacidadeDiaria: {
+    display: "block",
+    marginTop: 2,
+    fontSize: 10.5,
+    color: "#9ca3af",
+    fontWeight: 500,
   },
   capacidadeDias: {
     display: "block",

@@ -15,7 +15,7 @@ import {
   Legend,
 } from "recharts";
 import type { OP } from "@/lib/types";
-import { SETORES_ORDEM, SETORES_COM_CAPACIDADE } from "@/lib/setores";
+import { SETORES_ORDEM } from "@/lib/setores";
 import { diasNoSetor, corOcupacao, abreviaOficina } from "@/lib/kanban-utils";
 
 type HistoricoLinha = { data: string; setor: string; total_ops: number; total_pecas: number };
@@ -400,33 +400,34 @@ export default function DashboardPage() {
     for (const op of ops) {
       mapa.set(op.setor, (mapa.get(op.setor) ?? 0) + (op.quantidade || 0));
     }
-    return SETORES_ORDEM.filter((s) => mapa.has(s) && !éSetorRetrabalho(s)).map((setor) => ({
+    return ORDEM_SETORES_GRAFICO.map((setor) => ({
       setor,
       pecas: mapa.get(setor) ?? 0,
     }));
   }, [ops]);
 
   const ocupacaoPorSetor = useMemo(() => {
-    const resultado: { setor: string; ocupacao: number }[] = [];
-    for (const setor of SETORES_COM_CAPACIDADE) {
-      const capacidade = capacidadeSetores[setor] ?? 0;
-      if (capacidade <= 0) continue;
-      const total = ops
-        .filter((op) => op.setor === setor)
-        .reduce((acc, op) => acc + (op.quantidade || 0), 0);
-      resultado.push({ setor, ocupacao: (total / capacidade) * 100 });
-    }
     const cardsExterna = ops.filter((op) => op.setor === "COSTURA EXTERNA");
     const oficinasExterna = new Set(cardsExterna.map((op) => op.oficina).filter(Boolean) as string[]);
     const capacidadeExterna = Array.from(oficinasExterna).reduce(
       (acc, oficina) => acc + (capacidadeOficinas[oficina] ?? 0),
       0
     );
-    if (capacidadeExterna > 0) {
-      const totalExterna = cardsExterna.reduce((acc, op) => acc + (op.quantidade || 0), 0);
-      resultado.push({ setor: "COSTURA EXTERNA", ocupacao: (totalExterna / capacidadeExterna) * 100 });
-    }
-    return resultado;
+    const totalExterna = cardsExterna.reduce((acc, op) => acc + (op.quantidade || 0), 0);
+
+    return ORDEM_SETORES_GRAFICO.map((setor) => {
+      if (setor === "COSTURA EXTERNA") {
+        return {
+          setor,
+          ocupacao: capacidadeExterna > 0 ? (totalExterna / capacidadeExterna) * 100 : null,
+        };
+      }
+      const capacidade = capacidadeSetores[setor] ?? 0;
+      const total = ops
+        .filter((op) => op.setor === setor)
+        .reduce((acc, op) => acc + (op.quantidade || 0), 0);
+      return { setor, ocupacao: capacidade > 0 ? (total / capacidade) * 100 : null };
+    });
   }, [ops, capacidadeSetores, capacidadeOficinas]);
 
   const distribuicaoDias = useMemo(() => {
@@ -537,13 +538,20 @@ export default function DashboardPage() {
                 titulo="Peças por setor (agora)"
                 dica="Onde está concentrado o volume de peças parado neste momento."
               />
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={pecasPorSetor} layout="vertical" margin={{ left: 24 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                  <XAxis type="number" fontSize={11} />
-                  <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={pecasPorSetor} margin={{ bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="setor"
+                    fontSize={10.5}
+                    angle={-35}
+                    textAnchor="end"
+                    interval={0}
+                    height={70}
+                  />
+                  <YAxis fontSize={11} />
                   <Tooltip formatter={(v) => Number(v).toLocaleString("pt-BR")} />
-                  <Bar dataKey="pecas" name="Peças" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                  <Bar dataKey="pecas" name="Peças" fill="#6366f1" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </section>
@@ -553,23 +561,28 @@ export default function DashboardPage() {
                 titulo="% de ocupação por setor (agora)"
                 dica="Quão perto (ou acima) da capacidade diária configurada cada setor está agora."
               />
-              {ocupacaoPorSetor.length === 0 ? (
-                <p style={estilos.semDados}>Configure a capacidade em /capacidade pra ver este gráfico.</p>
-              ) : (
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={ocupacaoPorSetor} layout="vertical" margin={{ left: 24 }}>
-                    <CartesianGrid strokeDasharray="3 3" horizontal={false} />
-                    <XAxis type="number" fontSize={11} unit="%" />
-                    <YAxis type="category" dataKey="setor" width={110} fontSize={10.5} />
-                    <Tooltip formatter={(v) => `${Number(v).toFixed(0)}%`} />
-                    <Bar dataKey="ocupacao" name="Ocupação" radius={[0, 4, 4, 0]}>
-                      {ocupacaoPorSetor.map((entrada, idx) => (
-                        <Cell key={idx} fill={corOcupacao(entrada.ocupacao)} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart data={ocupacaoPorSetor} margin={{ bottom: 40 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                  <XAxis
+                    dataKey="setor"
+                    fontSize={10.5}
+                    angle={-35}
+                    textAnchor="end"
+                    interval={0}
+                    height={70}
+                  />
+                  <YAxis fontSize={11} unit="%" />
+                  <Tooltip
+                    formatter={(v) => (v === null ? "sem capacidade configurada" : `${Number(v).toFixed(0)}%`)}
+                  />
+                  <Bar dataKey="ocupacao" name="Ocupação" radius={[4, 4, 0, 0]}>
+                    {ocupacaoPorSetor.map((entrada, idx) => (
+                      <Cell key={idx} fill={corOcupacao(entrada.ocupacao)} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </section>
 
             <section style={estilos.card}>

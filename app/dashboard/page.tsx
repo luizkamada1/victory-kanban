@@ -64,6 +64,14 @@ function ordenarPorSetor<T extends { setor: string }>(itens: T[]): T[] {
   });
 }
 
+// Mesma cor pro mesmo setor em todos os gráficos (linha em "Evolução de peças
+// por setor" e barras nos demais).
+function corDoSetor(setor: string): string {
+  const idx = ORDEM_SETORES_GRAFICO.indexOf(setor);
+  if (idx === -1) return "#64748b";
+  return CORES_SERIE[idx % CORES_SERIE.length];
+}
+
 function TituloGrafico({ titulo, dica }: { titulo: string; dica: string }) {
   return (
     <div>
@@ -651,7 +659,7 @@ export default function DashboardPage() {
                         key={setor}
                         type="monotone"
                         dataKey={setor}
-                        stroke={CORES_SERIE[ORDEM_SETORES_GRAFICO.indexOf(setor) % CORES_SERIE.length] ?? "#64748b"}
+                        stroke={corDoSetor(setor)}
                         strokeWidth={1.5}
                         dot={false}
                       />
@@ -722,7 +730,11 @@ export default function DashboardPage() {
                             "Lead time",
                           ]}
                         />
-                        <Bar dataKey="mediaDias" name="Lead time" fill="#0ea5e9" radius={[4, 4, 0, 0]} />
+                        <Bar dataKey="mediaDias" name="Lead time" radius={[4, 4, 0, 0]}>
+                          {ordenarPorSetor(leadTimePorSetor).map((entrada, idx) => (
+                            <Cell key={idx} fill={corDoSetor(entrada.setor)} />
+                          ))}
+                        </Bar>
                       </BarChart>
                     </ResponsiveContainer>
                   )}
@@ -773,7 +785,11 @@ export default function DashboardPage() {
                         "Produção",
                       ]}
                     />
-                    <Bar dataKey="pecas" name="Produção" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                    <Bar dataKey="pecas" name="Produção" radius={[4, 4, 0, 0]}>
+                      {ordenarPorSetor(producaoPeriodo).map((entrada, idx) => (
+                        <Cell key={idx} fill={corDoSetor(entrada.setor)} />
+                      ))}
+                    </Bar>
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -793,7 +809,7 @@ export default function DashboardPage() {
                       onChange={(e) => setSetorEvolucao(e.target.value)}
                       style={estilos.filtroPeriodoInput}
                     >
-                      {SETORES_ORDEM.map((s) => (
+                      {ORDEM_SETORES_GRAFICO.map((s) => (
                         <option key={s} value={s}>
                           {s}
                         </option>
@@ -829,7 +845,7 @@ export default function DashboardPage() {
                       type="monotone"
                       dataKey="pecas"
                       name="Produção"
-                      stroke="#16a34a"
+                      stroke={corDoSetor(setorEvolucao)}
                       strokeWidth={2}
                       dot={{ r: 3 }}
                     />

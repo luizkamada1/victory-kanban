@@ -53,15 +53,23 @@ const ORDEM_SETORES_GRAFICO = [
   "ACABAMENTO",
 ];
 
+// Setores de retrabalho (RET. CORTE, RET. COSTURA, etc.) ficam fora dos
+// gráficos do dashboard.
+function éSetorRetrabalho(setor: string): boolean {
+  return /^ret[.\s]/i.test(setor.trim());
+}
+
 function ordenarPorSetor<T extends { setor: string }>(itens: T[]): T[] {
-  return [...itens].sort((a, b) => {
-    const ia = ORDEM_SETORES_GRAFICO.indexOf(a.setor);
-    const ib = ORDEM_SETORES_GRAFICO.indexOf(b.setor);
-    const pa = ia === -1 ? 999 : ia;
-    const pb = ib === -1 ? 999 : ib;
-    if (pa !== pb) return pa - pb;
-    return a.setor.localeCompare(b.setor);
-  });
+  return itens
+    .filter((item) => !éSetorRetrabalho(item.setor))
+    .sort((a, b) => {
+      const ia = ORDEM_SETORES_GRAFICO.indexOf(a.setor);
+      const ib = ORDEM_SETORES_GRAFICO.indexOf(b.setor);
+      const pa = ia === -1 ? 999 : ia;
+      const pb = ib === -1 ? 999 : ib;
+      if (pa !== pb) return pa - pb;
+      return a.setor.localeCompare(b.setor);
+    });
 }
 
 // Mesma cor pro mesmo setor em todos os gráficos (linha em "Evolução de peças
@@ -207,15 +215,28 @@ export default function DashboardPage() {
     setPeriodoFim(fim);
   }
 
-  const [setorEvolucao, setSetorEvolucao] = useState<string>(SETORES_ORDEM[0]);
+  const [setoresEvolucaoDiaria, setSetoresEvolucaoDiaria] = useState<Set<string>>(
+    new Set(ORDEM_SETORES_GRAFICO)
+  );
+  const [mostrarSeletorEvolucaoDiaria, setMostrarSeletorEvolucaoDiaria] = useState(false);
   const [presetEvolucao, setPresetEvolucao] = useState<PresetPeriodo>("mes");
   const [evolucaoInicio, setEvolucaoInicio] = useState(() => calcularPeriodo("mes").inicio);
   const [evolucaoFim, setEvolucaoFim] = useState(() => calcularPeriodo("mes").fim);
-  const [producaoDiariaSetor, setProducaoDiariaSetor] = useState<{ data: string; pecas: number }[]>(
+  const [producaoDiariaSetor, setProducaoDiariaSetor] = useState<Record<string, string | number>[]>(
     []
   );
+  const [setoresComDadosDiaria, setSetoresComDadosDiaria] = useState<string[]>([]);
   const [carregandoProducaoDiaria, setCarregandoProducaoDiaria] = useState(false);
   const [erroProducaoDiaria, setErroProducaoDiaria] = useState<string | null>(null);
+
+  function toggleSetorEvolucaoDiaria(setor: string) {
+    setSetoresEvolucaoDiaria((atual) => {
+      const novo = new Set(atual);
+      if (novo.has(setor)) novo.delete(setor);
+      else novo.add(setor);
+      return novo;
+    });
+  }
 
   function mudarPresetEvolucao(p: PresetPeriodo) {
     setPresetEvolucao(p);
@@ -327,37 +348,59 @@ export default function DashboardPage() {
     })();
   }, [periodoInicio, periodoFim]);
 
+  const setoresEvolucaoDiariaChave = Array.from(setoresEvolucaoDiaria).sort().join(",");
+
   useEffect(() => {
+    if (setoresEvolucaoDiaria.size === 0) {
+      setProducaoDiariaSetor([]);
+      setSetoresComDadosDiaria([]);
+      return;
+    }
     (async () => {
       setCarregandoProducaoDiaria(true);
       setErroProducaoDiaria(null);
       try {
         const resp = await fetch(
-          `/api/producao-diaria?setor=${encodeURIComponent(setorEvolucao)}&inicio=${evolucaoInicio}&fim=${evolucaoFim}`,
+          `/api/producao-diaria?setores=${encodeURIComponent(
+            Array.from(setoresEvolucaoDiaria).join(",")
+          )}&inicio=${evolucaoInicio}&fim=${evolucaoFim}`,
           { cache: "no-store" }
         );
         const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "Erro ao carregar evolução do setor");
-        setProducaoDiariaSetor(
-          (data.pontos || []).map((p: { data: string; pecas: number }) => ({
-            data: formataDataCurta(p.data),
-            pecas: p.pecas,
-          }))
-        );
+        if (!resp.ok) throw new Error(data.error || "Erro ao carregar evolução dos setores");
+        const pontos: { data: string; setor: string; pecas: number }[] = data.pontos || [];
+
+        const datas = Array.from(new Set(pontos.map((p) => p.data))).sort();
+        const setoresPresentes = ordenarPorSetor(
+          Array.from(new Set(pontos.map((p) => p.setor))).map((setor) => ({ setor }))
+        ).map((s) => s.setor);
+
+        const linhas = datas.map((data) => {
+          const linha: Record<string, string | number> = { data: formataDataCurta(data) };
+          for (const setor of setoresPresentes) {
+            const encontrado = pontos.find((p) => p.data === data && p.setor === setor);
+            linha[setor] = encontrado?.pecas ?? 0;
+          }
+          return linha;
+        });
+
+        setProducaoDiariaSetor(linhas);
+        setSetoresComDadosDiaria(setoresPresentes);
       } catch (e: unknown) {
         setErroProducaoDiaria(e instanceof Error ? e.message : "Erro desconhecido");
       } finally {
         setCarregandoProducaoDiaria(false);
       }
     })();
-  }, [setorEvolucao, evolucaoInicio, evolucaoFim]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [setoresEvolucaoDiariaChave, evolucaoInicio, evolucaoFim]);
 
   const pecasPorSetor = useMemo(() => {
     const mapa = new Map<string, number>();
     for (const op of ops) {
       mapa.set(op.setor, (mapa.get(op.setor) ?? 0) + (op.quantidade || 0));
     }
-    return SETORES_ORDEM.filter((s) => mapa.has(s)).map((setor) => ({
+    return SETORES_ORDEM.filter((s) => mapa.has(s) && !éSetorRetrabalho(s)).map((setor) => ({
       setor,
       pecas: mapa.get(setor) ?? 0,
     }));
@@ -436,8 +479,8 @@ export default function DashboardPage() {
       (l) => l.data >= evolSetorInicio && l.data <= evolSetorFim
     );
     const datas = Array.from(new Set(historicoPeriodo.map((l) => l.data))).sort();
-    const setoresPresentes = Array.from(new Set(historicoPeriodo.map((l) => l.setor))).filter((s) =>
-      (SETORES_ORDEM as readonly string[]).includes(s)
+    const setoresPresentes = Array.from(new Set(historicoPeriodo.map((l) => l.setor))).filter(
+      (s) => (SETORES_ORDEM as readonly string[]).includes(s) && !éSetorRetrabalho(s)
     );
     const ordenados = SETORES_ORDEM.filter((s) => setoresPresentes.includes(s));
     const linhas = datas.map((data) => {
@@ -799,23 +842,15 @@ export default function DashboardPage() {
               <div style={estilos.cardTituloComFiltro}>
                 <TituloGrafico
                   titulo="Evolução diária de produção por setor"
-                  dica="Como a produção diária de um setor específico variou dia a dia dentro do período."
+                  dica="Como a produção diária de cada setor selecionado variou dia a dia dentro do período."
                 />
                 <div style={estilos.filtroPeriodo}>
-                  <label style={estilos.filtroPeriodoLabel}>
-                    Setor
-                    <select
-                      value={setorEvolucao}
-                      onChange={(e) => setSetorEvolucao(e.target.value)}
-                      style={estilos.filtroPeriodoInput}
-                    >
-                      {ORDEM_SETORES_GRAFICO.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <button
+                    onClick={() => setMostrarSeletorEvolucaoDiaria((v) => !v)}
+                    style={estilos.botaoPreset}
+                  >
+                    Setores ({setoresEvolucaoDiaria.size}/{ORDEM_SETORES_GRAFICO.length})
+                  </button>
                   <FiltroPeriodo
                     preset={presetEvolucao}
                     inicio={evolucaoInicio}
@@ -826,29 +861,47 @@ export default function DashboardPage() {
                   />
                 </div>
               </div>
+              {mostrarSeletorEvolucaoDiaria && (
+                <div style={estilos.seletorSetoresPainel}>
+                  {ORDEM_SETORES_GRAFICO.map((setor) => (
+                    <label key={setor} style={estilos.seletorSetorItem}>
+                      <input
+                        type="checkbox"
+                        checked={setoresEvolucaoDiaria.has(setor)}
+                        onChange={() => toggleSetorEvolucaoDiaria(setor)}
+                      />
+                      {setor}
+                    </label>
+                  ))}
+                </div>
+              )}
               {erroProducaoDiaria ? (
                 <p style={estilos.semDados}>Erro: {erroProducaoDiaria}</p>
               ) : carregandoProducaoDiaria ? (
                 <p style={estilos.semDados}>Carregando...</p>
+              ) : setoresEvolucaoDiaria.size === 0 ? (
+                <p style={estilos.semDados}>Selecione ao menos um setor.</p>
               ) : producaoDiariaSetor.length === 0 ? (
-                <p style={estilos.semDados}>
-                  Nenhuma peça saiu de {setorEvolucao} nesse período.
-                </p>
+                <p style={estilos.semDados}>Nenhuma peça saiu desses setores nesse período.</p>
               ) : (
-                <ResponsiveContainer width="100%" height={280}>
+                <ResponsiveContainer width="100%" height={320}>
                   <LineChart data={producaoDiariaSetor}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="data" fontSize={11} />
                     <YAxis fontSize={11} />
                     <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
-                    <Line
-                      type="monotone"
-                      dataKey="pecas"
-                      name="Produção"
-                      stroke={corDoSetor(setorEvolucao)}
-                      strokeWidth={2}
-                      dot={{ r: 3 }}
-                    />
+                    <Legend wrapperStyle={{ fontSize: 11 }} />
+                    {setoresComDadosDiaria.map((setor) => (
+                      <Line
+                        key={setor}
+                        type="monotone"
+                        dataKey={setor}
+                        name={setor}
+                        stroke={corDoSetor(setor)}
+                        strokeWidth={1.5}
+                        dot={false}
+                      />
+                    ))}
                   </LineChart>
                 </ResponsiveContainer>
               )}

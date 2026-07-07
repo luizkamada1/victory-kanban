@@ -54,7 +54,7 @@ export const KanbanCard = forwardRef<HTMLDivElement, KanbanCardProps>(function K
           )}
           {previsao && !dataInicio && (
             <span style={estilos.cardPrevisaoEstimativa} title="Estimativa de conclusão (ainda não iniciada)">
-              🏁 {formataPrevisao(previsao)} (estimativa)
+              🏁 {formataPrevisao(previsao)}
             </span>
           )}
           {previsao && dataInicio && !atrasada && (
@@ -96,7 +96,7 @@ export const KanbanCard = forwardRef<HTMLDivElement, KanbanCardProps>(function K
               onPointerDown={(e) => e.stopPropagation()}
               style={estilos.iniciarBotao}
             >
-              ▶ Iniciar produção
+              ▶ Iniciar
             </button>
           )
         )}

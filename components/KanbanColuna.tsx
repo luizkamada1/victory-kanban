@@ -61,6 +61,7 @@ export function KanbanColuna({
 
   const totalPecasSetor = cards.reduce((acc, op) => acc + (op.quantidade || 0), 0);
   const mostrarOficina = SETORES_COM_OFICINA.includes(setor);
+  const permiteIniciar = (SETORES_COM_CAPACIDADE as readonly string[]).includes(setor);
 
   let capacidadeSetor: number | null = null;
   if ((SETORES_COM_CAPACIDADE as readonly string[]).includes(setor)) {
@@ -108,28 +109,33 @@ export function KanbanColuna({
         ? capacidadeOficinas[op.oficina] ?? 0
         : capacidadeSetor ?? 0;
 
+    // A fila acumulada sempre soma a quantidade de TODAS as OPs do setor/
+    // oficina, mesmo as já iniciadas — afinal elas continuam ocupando
+    // capacidade até saírem de fato, então precisam contar na estimativa das
+    // OPs que estão atrás delas na fila.
+    let diasNecessariosFila: number | null = null;
+    if (setor === "COSTURA EXTERNA" && op.oficina) {
+      acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
+      if (capAplicavel > 0) {
+        diasNecessariosFila = Math.ceil(acumuladoPorOficina[op.oficina] / capAplicavel);
+      }
+    } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
+      acumuladoColuna += op.quantidade || 0;
+      diasNecessariosFila = Math.ceil(acumuladoColuna / capacidadeSetor);
+    }
+
     let previsao: Date | null = null;
     if (dataInicio) {
-      // Já iniciada: previsão-alvo CONGELADA no momento do clique em "Iniciar
-      // produção" — não recalcula com a quantidade/capacidade atuais, senão
-      // não dá pra saber depois se entregou antes ou depois do previsto.
+      // Já iniciada: previsão-alvo CONGELADA no momento do clique em "Iniciar"
+      // — não recalcula com a quantidade/capacidade atuais, senão não dá pra
+      // saber depois se entregou antes ou depois do previsto.
       if (inicio?.previsaoAlvo) previsao = new Date(inicio.previsaoAlvo);
-    } else {
+    } else if (diasNecessariosFila !== null) {
       // Ainda não iniciada: estimativa a partir de hoje, considerando a fila
       // acumulada até essa OP (setor/oficina inteiro à frente dela).
       // "dias necessários" de 1 significa "cabe na capacidade de hoje" — por
       // isso subtrai 1 antes de somar à data de hoje (dia 1 = hoje, não amanhã).
-      if (setor === "COSTURA EXTERNA" && op.oficina) {
-        acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
-        if (capAplicavel > 0) {
-          const diasNecessarios = Math.ceil(acumuladoPorOficina[op.oficina] / capAplicavel);
-          previsao = addDiasUteis(new Date(), Math.max(0, diasNecessarios - 1));
-        }
-      } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
-        acumuladoColuna += op.quantidade || 0;
-        const diasNecessarios = Math.ceil(acumuladoColuna / capacidadeSetor);
-        previsao = addDiasUteis(new Date(), Math.max(0, diasNecessarios - 1));
-      }
+      previsao = addDiasUteis(new Date(), Math.max(0, diasNecessariosFila - 1));
     }
 
     return { op, chave, cor, dias, previsao, dataInicio };
@@ -250,14 +256,18 @@ export function KanbanColuna({
                   previsao={previsao}
                   mostrarOficina={mostrarOficina}
                   dataInicio={dataInicio}
-                  onIniciar={() => {
-                    const capAplicavel =
-                      setor === "COSTURA EXTERNA" && op.oficina
-                        ? capacidadeOficinas[op.oficina] ?? 0
-                        : capacidadeSetor ?? 0;
-                    const alvo = calcPrevisaoAlvo(new Date(), op.quantidade || 0, capAplicavel);
-                    onIniciar(setor, chave, alvo ? alvo.toISOString() : null);
-                  }}
+                  onIniciar={
+                    permiteIniciar
+                      ? () => {
+                          const capAplicavel =
+                            setor === "COSTURA EXTERNA" && op.oficina
+                              ? capacidadeOficinas[op.oficina] ?? 0
+                              : capacidadeSetor ?? 0;
+                          const alvo = calcPrevisaoAlvo(new Date(), op.quantidade || 0, capAplicavel);
+                          onIniciar(setor, chave, alvo ? alvo.toISOString() : null);
+                        }
+                      : undefined
+                  }
                   onDesfazerInicio={() => onDesfazerInicio(setor, chave)}
                 />
               ))}

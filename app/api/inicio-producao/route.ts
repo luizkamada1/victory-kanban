@@ -17,13 +17,13 @@ export async function GET() {
     const supabase = getSupabaseServer();
     const { data, error } = await supabase
       .from("op_inicio_producao")
-      .select("setor, chave, data_inicio");
+      .select("setor, chave, data_inicio, previsao_alvo");
     if (error) throw error;
 
-    const inicios: Record<string, Record<string, string>> = {};
+    const inicios: Record<string, Record<string, { dataInicio: string; previsaoAlvo: string | null }>> = {};
     for (const row of data ?? []) {
       if (!inicios[row.setor]) inicios[row.setor] = {};
-      inicios[row.setor][row.chave] = row.data_inicio;
+      inicios[row.setor][row.chave] = { dataInicio: row.data_inicio, previsaoAlvo: row.previsao_alvo };
     }
     return NextResponse.json({ inicios });
   } catch (err: unknown) {
@@ -36,6 +36,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const setor = String(body.setor ?? "").trim();
     const chave = String(body.chave ?? "").trim();
+    const previsaoAlvo = body.previsaoAlvo ? String(body.previsaoAlvo) : null;
     if (!setor || !chave) {
       return NextResponse.json({ error: "'setor' e 'chave' são obrigatórios." }, { status: 400 });
     }
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     const { error } = await supabase
       .from("op_inicio_producao")
       .upsert(
-        { setor, chave, data_inicio: new Date().toISOString() },
+        { setor, chave, data_inicio: new Date().toISOString(), previsao_alvo: previsaoAlvo },
         { onConflict: "setor,chave" }
       );
     if (error) throw error;

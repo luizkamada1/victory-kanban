@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSupabaseServer } from "@/lib/supabase";
-import { diasUteisEntre } from "@/lib/kanban-utils";
+import { diasUteisEntre, diasUteisComSinal } from "@/lib/kanban-utils";
 
 export const runtime = "nodejs";
 
@@ -116,6 +116,18 @@ export async function POST(req: NextRequest) {
       .select("op_numero, setor, oficina, quantidade, data_envio_fase");
     if (antigasError) throw antigasError;
 
+    // Previsões-alvo congeladas (ver op_inicio_producao) — usadas pra saber se
+    // uma OP que está saindo do setor entregou antes ou depois do previsto.
+    const { data: iniciosData, error: iniciosError } = await supabase
+      .from("op_inicio_producao")
+      .select("setor, chave, previsao_alvo");
+    if (iniciosError) throw iniciosError;
+    const previsoesAlvoPorChave = new Map(
+      (iniciosData ?? [])
+        .filter((i) => i.previsao_alvo)
+        .map((i) => [`${i.setor}::${i.chave}`, i.previsao_alvo as string])
+    );
+
     // Substitui todo o snapshot anterior pelo novo
     const { error: deleteError } = await supabase.from("producao_ops").delete().neq("op_numero", "");
     if (deleteError) throw deleteError;
@@ -157,16 +169,26 @@ export async function POST(req: NextRequest) {
 
     const transicoesCompletas = (linhasAntigas ?? [])
       .filter((antiga) => !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina)))
-      .map((antiga) => ({
-        op_numero: antiga.op_numero,
-        setor: antiga.setor,
-        oficina: antiga.oficina,
-        quantidade: antiga.quantidade,
-        data_entrada: antiga.data_envio_fase,
-        data_saida: hoje,
-        dias_uteis: diasUteisEntre(antiga.data_envio_fase, hoje),
-        tipo: opNumerosNovos.has(antiga.op_numero) ? "avancou" : "concluiu",
-      }));
+      .map((antiga) => {
+        const chaveInicio = `${antiga.setor}::${antiga.op_numero}::${antiga.oficina ?? ""}`;
+        const previsaoAlvo = previsoesAlvoPorChave.get(chaveInicio) ?? null;
+        return {
+          op_numero: antiga.op_numero,
+          setor: antiga.setor,
+          oficina: antiga.oficina,
+          quantidade: antiga.quantidade,
+          data_entrada: antiga.data_envio_fase,
+          data_saida: hoje,
+          dias_uteis: diasUteisEntre(antiga.data_envio_fase, hoje),
+          tipo: opNumerosNovos.has(antiga.op_numero) ? "avancou" : "concluiu",
+          dias_desempenho: previsaoAlvo ? diasUteisComSinal(previsaoAlvo, hoje) : null,
+        };
+      });
+
+    // A OP saiu do setor de vez — o registro de "iniciada" não serve mais.
+    const chavesParaLimpar = (linhasAntigas ?? [])
+      .filter((antiga) => !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina)))
+      .map((antiga) => ({ setor: antiga.setor, chave: `${antiga.op_numero}::${antiga.oficina ?? ""}` }));
 
     // Transições parciais: a linha (op+setor+oficina) continua existindo, só que
     // com menos peças do que antes — a diferença já saiu desse setor (avançou
@@ -195,6 +217,14 @@ export async function POST(req: NextRequest) {
     if (transicoes.length > 0) {
       const { error: transicoesError } = await supabase.from("historico_transicoes").insert(transicoes);
       if (transicoesError) throw transicoesError;
+    }
+
+    if (chavesParaLimpar.length > 0) {
+      await Promise.all(
+        chavesParaLimpar.map(({ setor, chave }) =>
+          supabase.from("op_inicio_producao").delete().eq("setor", setor).eq("chave", chave)
+        )
+      );
     }
 
     return NextResponse.json({ ok: true, total_ops: linhas.length });

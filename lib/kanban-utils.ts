@@ -93,6 +93,30 @@ export function formataPrevisao(data: Date): string {
   return data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
+// Calcula a data-alvo de conclusão no momento do início — usada apenas ao
+// clicar em "Iniciar produção". Depois disso o valor é congelado (salvo no
+// banco), então mudanças posteriores na quantidade da OP ou na capacidade
+// NÃO alteram mais essa data. É isso que permite medir depois se a operação
+// entregou antes ou depois do previsto.
+export function calcPrevisaoAlvo(dataInicio: Date, quantidade: number, capacidade: number): Date | null {
+  if (capacidade <= 0) return null;
+  const diasNecessarios = Math.ceil(quantidade / capacidade);
+  return addDiasUteis(dataInicio, Math.max(0, diasNecessarios - 1));
+}
+
+// Diferença em dias úteis entre duas datas, com sinal: positivo quando "para"
+// é depois de "de" (atraso), negativo quando é antes (adiantado), 0 se cair
+// no mesmo dia. Usado pra comparar a previsão-alvo com a data real de saída.
+export function diasUteisComSinal(de: Date | string, para: Date | string): number {
+  const dDe = new Date(de);
+  dDe.setHours(0, 0, 0, 0);
+  const dPara = new Date(para);
+  dPara.setHours(0, 0, 0, 0);
+  if (dPara.getTime() === dDe.getTime()) return 0;
+  if (dPara > dDe) return diasUteisEntre(dDe, dPara);
+  return -diasUteisEntre(dPara, dDe);
+}
+
 export function formataDataHora(dataIso: string): string {
   const data = new Date(dataIso);
   const dataStr = data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });

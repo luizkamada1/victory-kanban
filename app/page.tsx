@@ -34,7 +34,9 @@ export default function KanbanPage() {
   const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
-  const [iniciosProducao, setIniciosProducao] = useState<Record<string, Record<string, string>>>({});
+  const [iniciosProducao, setIniciosProducao] = useState<
+    Record<string, Record<string, { dataInicio: string; previsaoAlvo: string | null }>>
+  >({});
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -136,15 +138,15 @@ export default function KanbanPage() {
     });
   }
 
-  function iniciarProducao(setor: string, chave: string) {
+  function iniciarProducao(setor: string, chave: string, previsaoAlvo: string | null) {
     setIniciosProducao((atual) => ({
       ...atual,
-      [setor]: { ...atual[setor], [chave]: new Date().toISOString() },
+      [setor]: { ...atual[setor], [chave]: { dataInicio: new Date().toISOString(), previsaoAlvo } },
     }));
     fetch("/api/inicio-producao", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setor, chave }),
+      body: JSON.stringify({ setor, chave, previsaoAlvo }),
     }).catch(() => {
       // se falhar, a próxima carregarIniciosProducao() volta pro estado salvo no banco
     });

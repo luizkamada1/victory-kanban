@@ -20,9 +20,12 @@ import {
   abreviaOficina,
   filaKey,
   addDiasUteis,
+  calcPrevisaoAlvo,
 } from "@/lib/kanban-utils";
 import { KanbanCard } from "./KanbanCard";
 import { SortableKanbanCard } from "./SortableKanbanCard";
+
+type InicioProducao = { dataInicio: string; previsaoAlvo: string | null };
 
 type Props = {
   setor: string;
@@ -32,8 +35,8 @@ type Props = {
   oficinasVisiveis: boolean;
   onToggleOficinasVisiveis: () => void;
   onReordenar: (setor: string, novaOrdemChaves: string[]) => void;
-  iniciosProducao: Record<string, string>;
-  onIniciar: (setor: string, chave: string) => void;
+  iniciosProducao: Record<string, InicioProducao>;
+  onIniciar: (setor: string, chave: string, previsaoAlvo: string | null) => void;
   onDesfazerInicio: (setor: string, chave: string) => void;
 };
 
@@ -97,7 +100,8 @@ export function KanbanColuna({
     const dias = diasNoSetor(op.data_envio_fase);
     const cor = corAlerta(dias);
     const chave = filaKey(op);
-    const dataInicio = iniciosProducao[chave] ?? null;
+    const inicio = iniciosProducao[chave] ?? null;
+    const dataInicio = inicio?.dataInicio ?? null;
 
     const capAplicavel =
       setor === "COSTURA EXTERNA" && op.oficina
@@ -106,13 +110,10 @@ export function KanbanColuna({
 
     let previsao: Date | null = null;
     if (dataInicio) {
-      // Já iniciada: previsão ancorada no início real, considerando só a
-      // quantidade da própria OP ÷ capacidade (recalculada a cada render com
-      // a capacidade atual) — pode cair no passado, indicando atraso real.
-      if (capAplicavel > 0) {
-        const diasNecessarios = Math.ceil((op.quantidade || 0) / capAplicavel);
-        previsao = addDiasUteis(new Date(dataInicio), Math.max(0, diasNecessarios - 1));
-      }
+      // Já iniciada: previsão-alvo CONGELADA no momento do clique em "Iniciar
+      // produção" — não recalcula com a quantidade/capacidade atuais, senão
+      // não dá pra saber depois se entregou antes ou depois do previsto.
+      if (inicio?.previsaoAlvo) previsao = new Date(inicio.previsaoAlvo);
     } else {
       // Ainda não iniciada: estimativa a partir de hoje, considerando a fila
       // acumulada até essa OP (setor/oficina inteiro à frente dela).
@@ -249,7 +250,14 @@ export function KanbanColuna({
                   previsao={previsao}
                   mostrarOficina={mostrarOficina}
                   dataInicio={dataInicio}
-                  onIniciar={() => onIniciar(setor, chave)}
+                  onIniciar={() => {
+                    const capAplicavel =
+                      setor === "COSTURA EXTERNA" && op.oficina
+                        ? capacidadeOficinas[op.oficina] ?? 0
+                        : capacidadeSetor ?? 0;
+                    const alvo = calcPrevisaoAlvo(new Date(), op.quantidade || 0, capAplicavel);
+                    onIniciar(setor, chave, alvo ? alvo.toISOString() : null);
+                  }}
                   onDesfazerInicio={() => onDesfazerInicio(setor, chave)}
                 />
               ))}

@@ -76,12 +76,37 @@ export function filaKey(op: OP): string {
   return `${op.op_numero}::${op.oficina ?? ""}`;
 }
 
-export function addDias(data: Date, dias: number): Date {
+// Soma dias ÚTEIS a uma data (pula sábado e domingo) — usado nas previsões de
+// conclusão, pra não contar fim de semana como capacidade produtiva.
+export function addDiasUteis(data: Date, diasUteis: number): Date {
   const resultado = new Date(data);
-  resultado.setDate(resultado.getDate() + dias);
+  let restante = diasUteis;
+  while (restante > 0) {
+    resultado.setDate(resultado.getDate() + 1);
+    const diaSemana = resultado.getDay();
+    if (diaSemana !== 0 && diaSemana !== 6) restante--;
+  }
   return resultado;
 }
 
 export function formataPrevisao(data: Date): string {
   return data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+export function formataDataHora(dataIso: string): string {
+  const data = new Date(dataIso);
+  const dataStr = data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const horaStr = data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${dataStr} às ${horaStr}`;
+}
+
+// Verifica se uma previsão (baseada em dias úteis) já passou, comparando só a
+// data (sem horário) — usado pra marcar uma OP como "atrasada" quando ela foi
+// iniciada de verdade e a previsão ficou no passado.
+export function estaAtrasada(previsao: Date): boolean {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const dataPrevisao = new Date(previsao);
+  dataPrevisao.setHours(0, 0, 0, 0);
+  return dataPrevisao < hoje;
 }

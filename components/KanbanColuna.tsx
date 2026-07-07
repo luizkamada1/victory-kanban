@@ -19,7 +19,7 @@ import {
   corOcupacao,
   abreviaOficina,
   filaKey,
-  addDias,
+  addDiasUteis,
 } from "@/lib/kanban-utils";
 import { KanbanCard } from "./KanbanCard";
 import { SortableKanbanCard } from "./SortableKanbanCard";
@@ -32,6 +32,9 @@ type Props = {
   oficinasVisiveis: boolean;
   onToggleOficinasVisiveis: () => void;
   onReordenar: (setor: string, novaOrdemChaves: string[]) => void;
+  iniciosProducao: Record<string, string>;
+  onIniciar: (setor: string, chave: string) => void;
+  onDesfazerInicio: (setor: string, chave: string) => void;
 };
 
 export function KanbanColuna({
@@ -42,6 +45,9 @@ export function KanbanColuna({
   oficinasVisiveis,
   onToggleOficinasVisiveis,
   onReordenar,
+  iniciosProducao,
+  onIniciar,
+  onDesfazerInicio,
 }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -90,24 +96,42 @@ export function KanbanColuna({
   const cardsComputados = cards.map((op) => {
     const dias = diasNoSetor(op.data_envio_fase);
     const cor = corAlerta(dias);
+    const chave = filaKey(op);
+    const dataInicio = iniciosProducao[chave] ?? null;
 
-    // "dias necessários" de 1 significa "cabe na capacidade de hoje" — por isso
-    // subtrai 1 antes de somar à data de hoje (dia 1 = hoje, não amanhã).
+    const capAplicavel =
+      setor === "COSTURA EXTERNA" && op.oficina
+        ? capacidadeOficinas[op.oficina] ?? 0
+        : capacidadeSetor ?? 0;
+
     let previsao: Date | null = null;
-    if (setor === "COSTURA EXTERNA" && op.oficina) {
-      const capOf = capacidadeOficinas[op.oficina] ?? 0;
-      acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
-      if (capOf > 0) {
-        const diasNecessarios = Math.ceil(acumuladoPorOficina[op.oficina] / capOf);
-        previsao = addDias(new Date(), Math.max(0, diasNecessarios - 1));
+    if (dataInicio) {
+      // Já iniciada: previsão ancorada no início real, considerando só a
+      // quantidade da própria OP ÷ capacidade (recalculada a cada render com
+      // a capacidade atual) — pode cair no passado, indicando atraso real.
+      if (capAplicavel > 0) {
+        const diasNecessarios = Math.ceil((op.quantidade || 0) / capAplicavel);
+        previsao = addDiasUteis(new Date(dataInicio), Math.max(0, diasNecessarios - 1));
       }
-    } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
-      acumuladoColuna += op.quantidade || 0;
-      const diasNecessarios = Math.ceil(acumuladoColuna / capacidadeSetor);
-      previsao = addDias(new Date(), Math.max(0, diasNecessarios - 1));
+    } else {
+      // Ainda não iniciada: estimativa a partir de hoje, considerando a fila
+      // acumulada até essa OP (setor/oficina inteiro à frente dela).
+      // "dias necessários" de 1 significa "cabe na capacidade de hoje" — por
+      // isso subtrai 1 antes de somar à data de hoje (dia 1 = hoje, não amanhã).
+      if (setor === "COSTURA EXTERNA" && op.oficina) {
+        acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
+        if (capAplicavel > 0) {
+          const diasNecessarios = Math.ceil(acumuladoPorOficina[op.oficina] / capAplicavel);
+          previsao = addDiasUteis(new Date(), Math.max(0, diasNecessarios - 1));
+        }
+      } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
+        acumuladoColuna += op.quantidade || 0;
+        const diasNecessarios = Math.ceil(acumuladoColuna / capacidadeSetor);
+        previsao = addDiasUteis(new Date(), Math.max(0, diasNecessarios - 1));
+      }
     }
 
-    return { op, chave: filaKey(op), cor, dias, previsao };
+    return { op, chave, cor, dias, previsao, dataInicio };
   });
 
   const cardAtivo = cardsComputados.find((c) => c.chave === activeId);
@@ -215,7 +239,7 @@ export function KanbanColuna({
               items={cardsComputados.map((c) => c.chave)}
               strategy={verticalListSortingStrategy}
             >
-              {cardsComputados.map(({ op, chave, cor, dias, previsao }) => (
+              {cardsComputados.map(({ op, chave, cor, dias, previsao, dataInicio }) => (
                 <SortableKanbanCard
                   key={op.id}
                   id={chave}
@@ -224,6 +248,9 @@ export function KanbanColuna({
                   dias={dias}
                   previsao={previsao}
                   mostrarOficina={mostrarOficina}
+                  dataInicio={dataInicio}
+                  onIniciar={() => onIniciar(setor, chave)}
+                  onDesfazerInicio={() => onDesfazerInicio(setor, chave)}
                 />
               ))}
             </SortableContext>
@@ -235,6 +262,7 @@ export function KanbanColuna({
                   dias={cardAtivo.dias}
                   previsao={cardAtivo.previsao}
                   mostrarOficina={mostrarOficina}
+                  dataInicio={cardAtivo.dataInicio}
                   isOverlay
                 />
               )}

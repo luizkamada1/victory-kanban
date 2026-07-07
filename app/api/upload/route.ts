@@ -229,7 +229,15 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, total_ops: linhas.length });
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Erro desconhecido";
+    // Erros do supabase-js (PostgrestError) não são instâncias de Error, então
+    // "err instanceof Error" sozinho escondia a mensagem real por trás de um
+    // genérico "Erro desconhecido".
+    const message =
+      err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Erro desconhecido";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

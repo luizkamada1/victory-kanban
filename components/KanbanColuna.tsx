@@ -91,16 +91,20 @@ export function KanbanColuna({
     const dias = diasNoSetor(op.data_envio_fase);
     const cor = corAlerta(dias);
 
+    // "dias necessários" de 1 significa "cabe na capacidade de hoje" — por isso
+    // subtrai 1 antes de somar à data de hoje (dia 1 = hoje, não amanhã).
     let previsao: Date | null = null;
     if (setor === "COSTURA EXTERNA" && op.oficina) {
       const capOf = capacidadeOficinas[op.oficina] ?? 0;
       acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
       if (capOf > 0) {
-        previsao = addDias(new Date(), Math.ceil(acumuladoPorOficina[op.oficina] / capOf));
+        const diasNecessarios = Math.ceil(acumuladoPorOficina[op.oficina] / capOf);
+        previsao = addDias(new Date(), Math.max(0, diasNecessarios - 1));
       }
     } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
       acumuladoColuna += op.quantidade || 0;
-      previsao = addDias(new Date(), Math.ceil(acumuladoColuna / capacidadeSetor));
+      const diasNecessarios = Math.ceil(acumuladoColuna / capacidadeSetor);
+      previsao = addDias(new Date(), Math.max(0, diasNecessarios - 1));
     }
 
     return { op, chave: filaKey(op), cor, dias, previsao };

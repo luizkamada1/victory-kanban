@@ -5,6 +5,7 @@ import { SETORES_ORDEM } from "@/lib/setores";
 import type { OP } from "@/lib/types";
 import { normaliza, abreviaOficina, filaKey } from "@/lib/kanban-utils";
 import { KanbanColuna, type ProducaoIndicador } from "@/components/KanbanColuna";
+import { useHeaderRecolhido } from "@/lib/useHeaderRecolhido";
 
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutos
 const STORAGE_KEY = "victory_kanban_setores_visiveis";
@@ -35,6 +36,7 @@ export default function KanbanPage() {
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
   const [producaoPorOp, setProducaoPorOp] = useState<Record<string, ProducaoIndicador>>({});
+  const { recolhido, alternar } = useHeaderRecolhido();
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -195,12 +197,12 @@ export default function KanbanPage() {
   const totalPecas = opsFiltradas.reduce((acc, op) => acc + (op.quantidade || 0), 0);
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      <header style={estilos.header}>
+    <div style={estilos.pagina}>
+      <header style={{ ...estilos.header, ...(recolhido ? estilos.headerRecolhido : {}) }}>
         <div style={estilos.headerTopo}>
           <div>
             <h1 style={estilos.titulo}>Victory Pijamas</h1>
-            <p style={estilos.subtitulo}>Kanban de Produção</p>
+            {!recolhido && <p style={estilos.subtitulo}>Kanban de Produção</p>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button
@@ -218,55 +220,66 @@ export default function KanbanPage() {
             <a href="/upload" style={{ ...estilos.botao, ...estilos.botaoPrimario }}>
               Enviar planilha
             </a>
+            <button
+              onClick={alternar}
+              style={estilos.botaoRecolher}
+              title={recolhido ? "Expandir cabeçalho" : "Recolher cabeçalho"}
+            >
+              {recolhido ? "▾" : "▴"}
+            </button>
           </div>
         </div>
 
-        <div style={estilos.headerBaixo}>
-          <div style={estilos.buscaWrapper}>
-            <span style={estilos.buscaIcone}>⌕</span>
-            <input
-              type="text"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar por OP, código, produto ou oficina..."
-              style={estilos.buscaInput}
-            />
-            {busca && (
-              <button onClick={() => setBusca("")} style={estilos.buscaLimpar} aria-label="Limpar busca">
-                ×
-              </button>
-            )}
-          </div>
-
-          <p style={estilos.stats}>
-            <strong>{totalOps}</strong> OP{totalOps === 1 ? "" : "s"} em andamento ·{" "}
-            <strong>{totalPecas.toLocaleString("pt-BR")}</strong> peças
-            {ultimaAtualizacao && (
-              <span style={{ color: "#9ca3af" }}>
-                {" "}
-                · última planilha enviada {formataUltimaAtualizacao(ultimaAtualizacao)}
-              </span>
-            )}
-          </p>
-        </div>
-
-        {mostrarFiltro && (
-          <div style={estilos.filtroPainel}>
-            {SETORES_ORDEM.map((setor) => (
-              <label key={setor} style={estilos.filtroItem}>
+        {!recolhido && (
+          <>
+            <div style={estilos.headerBaixo}>
+              <div style={estilos.buscaWrapper}>
+                <span style={estilos.buscaIcone}>⌕</span>
                 <input
-                  type="checkbox"
-                  checked={setoresVisiveis.has(setor)}
-                  onChange={() => toggleSetor(setor)}
+                  type="text"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Buscar por OP, código, produto ou oficina..."
+                  style={estilos.buscaInput}
                 />
-                {setor}
-              </label>
-            ))}
-          </div>
+                {busca && (
+                  <button onClick={() => setBusca("")} style={estilos.buscaLimpar} aria-label="Limpar busca">
+                    ×
+                  </button>
+                )}
+              </div>
+
+              <p style={estilos.stats}>
+                <strong>{totalOps}</strong> OP{totalOps === 1 ? "" : "s"} em andamento ·{" "}
+                <strong>{totalPecas.toLocaleString("pt-BR")}</strong> peças
+                {ultimaAtualizacao && (
+                  <span style={{ color: "#9ca3af" }}>
+                    {" "}
+                    · última planilha enviada {formataUltimaAtualizacao(ultimaAtualizacao)}
+                  </span>
+                )}
+              </p>
+            </div>
+
+            {mostrarFiltro && (
+              <div style={estilos.filtroPainel}>
+                {SETORES_ORDEM.map((setor) => (
+                  <label key={setor} style={estilos.filtroItem}>
+                    <input
+                      type="checkbox"
+                      checked={setoresVisiveis.has(setor)}
+                      onChange={() => toggleSetor(setor)}
+                    />
+                    {setor}
+                  </label>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </header>
 
-      <main style={{ padding: "0 24px 24px" }}>
+      <main style={estilos.main}>
         {erro && (
           <div style={estilos.erroBox}>
             <strong>Erro:</strong> {erro}
@@ -327,14 +340,39 @@ export default function KanbanPage() {
 }
 
 const estilos: Record<string, React.CSSProperties> = {
+  pagina: {
+    height: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
   header: {
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
+    flexShrink: 0,
     background: "#14142b",
     color: "#fff",
     padding: "20px 24px 16px",
     boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+  },
+  headerRecolhido: {
+    padding: "10px 24px",
+  },
+  botaoRecolher: {
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    width: 34,
+    padding: "8px 0",
+    fontSize: 13,
+    cursor: "pointer",
+    color: "#fff",
+  },
+  main: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    padding: "0 24px 24px",
+    overflow: "hidden",
   },
   headerTopo: {
     display: "flex",
@@ -465,9 +503,12 @@ const estilos: Record<string, React.CSSProperties> = {
   quadro: {
     display: "flex",
     gap: 14,
+    flex: 1,
+    minHeight: 0,
     overflowX: "auto",
+    overflowY: "hidden",
     paddingTop: 20,
     paddingBottom: 12,
-    alignItems: "flex-start",
+    alignItems: "stretch",
   },
 };

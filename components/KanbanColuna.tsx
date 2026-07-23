@@ -254,7 +254,7 @@ const estilos: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     display: "flex",
     flexDirection: "column",
-    maxHeight: "calc(100vh - 170px)",
+    height: "100%",
     overflow: "hidden",
   },
   colunaHeader: {

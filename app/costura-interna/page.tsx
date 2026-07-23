@@ -16,6 +16,7 @@ import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable } 
 import { CSS } from "@dnd-kit/utilities";
 import type { OP } from "@/lib/types";
 import { filaKey, formataPrevisao, formataDataHora } from "@/lib/kanban-utils";
+import { useHeaderRecolhido } from "@/lib/useHeaderRecolhido";
 
 const SETOR = "COSTURA INTERNA";
 const REFRESH_MS = 5 * 60 * 1000;
@@ -56,6 +57,7 @@ export default function CosturaInternaPage() {
   const [erro, setErro] = useState<string | null>(null);
   const [modalIniciarOp, setModalIniciarOp] = useState<OP | null>(null);
   const [modalCapacidadeAberto, setModalCapacidadeAberto] = useState(false);
+  const { recolhido, alternar } = useHeaderRecolhido();
 
   const carregarOps = useCallback(async () => {
     try {
@@ -219,12 +221,12 @@ export default function CosturaInternaPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh" }}>
-      <header style={estilos.header}>
+    <div style={estilos.pagina}>
+      <header style={{ ...estilos.header, ...(recolhido ? estilos.headerRecolhido : {}) }}>
         <div style={estilos.headerTopo}>
           <div>
             <h1 style={estilos.titulo}>Costura Interna</h1>
-            <p style={estilos.subtitulo}>Tela exclusiva do setor</p>
+            {!recolhido && <p style={estilos.subtitulo}>Tela exclusiva do setor</p>}
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <a href="/" style={estilos.botao}>
@@ -233,11 +235,18 @@ export default function CosturaInternaPage() {
             <button onClick={() => setModalCapacidadeAberto(true)} style={estilos.botao}>
               Capacidade das Células
             </button>
+            <button
+              onClick={alternar}
+              style={estilos.botaoRecolher}
+              title={recolhido ? "Expandir cabeçalho" : "Recolher cabeçalho"}
+            >
+              {recolhido ? "▾" : "▴"}
+            </button>
           </div>
         </div>
       </header>
 
-      <main style={{ padding: "20px 24px 24px" }}>
+      <main style={estilos.main}>
         {erro && (
           <div style={estilos.erroBox}>
             <strong>Erro:</strong> {erro}
@@ -710,11 +719,39 @@ function ModalCapacidadeCelulas({
 }
 
 const estilos: Record<string, React.CSSProperties> = {
+  pagina: {
+    height: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+  },
   header: {
+    flexShrink: 0,
     background: "#14142b",
     color: "#fff",
     padding: "20px 24px",
     boxShadow: "0 2px 8px rgba(0,0,0,0.15)",
+  },
+  headerRecolhido: {
+    padding: "10px 24px",
+  },
+  botaoRecolher: {
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    width: 34,
+    padding: "8px 0",
+    fontSize: 13,
+    cursor: "pointer",
+    color: "#fff",
+  },
+  main: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    padding: "20px 24px 24px",
+    overflow: "hidden",
   },
   headerTopo: {
     display: "flex",
@@ -749,6 +786,7 @@ const estilos: Record<string, React.CSSProperties> = {
     gap: 14,
     flexWrap: "wrap",
     marginBottom: 20,
+    flexShrink: 0,
   },
   indicadorCard: {
     background: "#fff",
@@ -772,9 +810,12 @@ const estilos: Record<string, React.CSSProperties> = {
   quadro: {
     display: "flex",
     gap: 14,
+    flex: 1,
+    minHeight: 0,
     overflowX: "auto",
+    overflowY: "hidden",
     paddingBottom: 12,
-    alignItems: "flex-start",
+    alignItems: "stretch",
   },
   coluna: {
     minWidth: 280,
@@ -784,7 +825,7 @@ const estilos: Record<string, React.CSSProperties> = {
     flexShrink: 0,
     display: "flex",
     flexDirection: "column",
-    maxHeight: "calc(100vh - 320px)",
+    height: "100%",
     overflow: "hidden",
   },
   colunaHeader: {

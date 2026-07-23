@@ -383,79 +383,81 @@ export default function CosturaInternaPage() {
           )}
         </div>
 
-        <div style={estilos.graficosRow}>
-          <div style={estilos.graficoCard}>
-            <div style={estilos.indicadorTitulo}>Produção Acumulada do Dia</div>
-            <ResponsiveContainer width="100%" height={190}>
-              <LineChart data={acumuladoDiaData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis
-                  dataKey="hora"
-                  type="number"
-                  domain={[7, 19]}
-                  ticks={[7, 9, 11, 13, 15, 17, 19]}
-                  tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
-                  fontSize={11}
-                />
-                <YAxis fontSize={11} allowDecimals={false} />
-                <Tooltip
-                  labelFormatter={(h) => formataHoraFracionada(Number(h))}
-                  formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
-                />
-                <Line type="stepAfter" dataKey="acumulado" stroke="#6366f1" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div style={estilos.graficoCard}>
-            <div style={estilos.indicadorTitulo}>Produção da Semana</div>
-            <ResponsiveContainer width="100%" height={190}>
-              <BarChart data={producaoSemana} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                <XAxis dataKey="dia" fontSize={11} />
-                <YAxis fontSize={11} allowDecimals={false} />
-                <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
-                <Bar dataKey="total" radius={[4, 4, 0, 0]}>
-                  {producaoSemana.map((d, i) => (
-                    <Cell key={i} fill={d.ehHoje ? "#6366f1" : "#c7d2fe"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
         {loading ? (
           <div style={estilos.estadoVazio}>Carregando...</div>
         ) : (
-          <div style={estilos.quadro}>
-            <ColunaFilaEspera
-              linhas={filaEspera}
-              onReordenar={persistirOrdem}
-              onIniciar={(op) => setModalIniciarOp(op)}
-            />
-            <ColunaSimples titulo="Em Andamento" total={emAndamentoRows.length}>
-              {emAndamentoRows.length === 0 ? (
-                <div style={estilos.colunaVazia}>Sem produção em andamento</div>
-              ) : (
-                emAndamentoRows.map((p) => (
-                  <CardEmAndamento
-                    key={p.id}
-                    p={p}
-                    onConcluir={() => setModalConcluirRow(p)}
-                    onDesfazer={() => desfazerIniciar(p.id)}
-                  />
-                ))
-              )}
-            </ColunaSimples>
-            <ColunaSimples titulo="Concluído" total={concluidoRows.length}>
-              {concluidoRows.length === 0 ? (
-                <div style={estilos.colunaVazia}>Nenhuma conclusão ainda</div>
-              ) : (
-                concluidoRows.map((p) => (
-                  <CardConcluido key={p.id} p={p} onDesfazer={() => desfazerConcluir(p.id)} />
-                ))
-              )}
-            </ColunaSimples>
+          <div style={estilos.conteudoPrincipal}>
+            <div style={estilos.quadro}>
+              <ColunaFilaEspera
+                linhas={filaEspera}
+                onReordenar={persistirOrdem}
+                onIniciar={(op) => setModalIniciarOp(op)}
+              />
+              <ColunaSimples titulo="Em Andamento" total={emAndamentoRows.length}>
+                {emAndamentoRows.length === 0 ? (
+                  <div style={estilos.colunaVazia}>Sem produção em andamento</div>
+                ) : (
+                  emAndamentoRows.map((p) => (
+                    <CardEmAndamento
+                      key={p.id}
+                      p={p}
+                      onConcluir={() => setModalConcluirRow(p)}
+                      onDesfazer={() => desfazerIniciar(p.id)}
+                    />
+                  ))
+                )}
+              </ColunaSimples>
+              <ColunaSimples titulo="Concluído" total={concluidoRows.length}>
+                {concluidoRows.length === 0 ? (
+                  <div style={estilos.colunaVazia}>Nenhuma conclusão ainda</div>
+                ) : (
+                  concluidoRows.map((p) => (
+                    <CardConcluido key={p.id} p={p} onDesfazer={() => desfazerConcluir(p.id)} />
+                  ))
+                )}
+              </ColunaSimples>
+            </div>
+
+            <div style={estilos.graficosColuna}>
+              <div style={estilos.graficoCard}>
+                <div style={estilos.indicadorTitulo}>Produção Acumulada do Dia</div>
+                <ResponsiveContainer width="100%" height={190}>
+                  <LineChart data={acumuladoDiaData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis
+                      dataKey="hora"
+                      type="number"
+                      domain={[7, 19]}
+                      ticks={[7, 9, 11, 13, 15, 17, 19]}
+                      tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
+                      fontSize={11}
+                    />
+                    <YAxis fontSize={11} allowDecimals={false} />
+                    <Tooltip
+                      labelFormatter={(h) => formataHoraFracionada(Number(h))}
+                      formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
+                    />
+                    <Line type="stepAfter" dataKey="acumulado" stroke="#6366f1" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div style={estilos.graficoCard}>
+                <div style={estilos.indicadorTitulo}>Produção da Semana</div>
+                <ResponsiveContainer width="100%" height={190}>
+                  <BarChart data={producaoSemana} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis dataKey="dia" fontSize={11} />
+                    <YAxis fontSize={11} allowDecimals={false} />
+                    <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
+                    <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+                      {producaoSemana.map((d, i) => (
+                        <Cell key={i} fill={d.ehHoje ? "#6366f1" : "#c7d2fe"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
           </div>
         )}
       </main>
@@ -1027,22 +1029,13 @@ const estilos: Record<string, React.CSSProperties> = {
   indicadorTitulo: { fontSize: 12.5, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" },
   indicadorValor: { fontSize: 30, fontWeight: 800, color: "#111827", marginTop: 6 },
   indicadorRodape: { fontSize: 12, color: "#9ca3af", marginTop: 8 },
-  graficosRow: {
+  estadoVazio: { textAlign: "center", padding: 60, color: "#6b7280", fontSize: 14 },
+  conteudoPrincipal: {
     display: "flex",
     gap: 14,
-    flexWrap: "wrap",
-    marginBottom: 20,
-    flexShrink: 0,
+    flex: 1,
+    minHeight: 0,
   },
-  graficoCard: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 12,
-    padding: "16px 20px",
-    flex: "1 1 380px",
-    minWidth: 0,
-  },
-  estadoVazio: { textAlign: "center", padding: 60, color: "#6b7280", fontSize: 14 },
   quadro: {
     display: "flex",
     gap: 14,
@@ -1052,6 +1045,22 @@ const estilos: Record<string, React.CSSProperties> = {
     overflowY: "hidden",
     paddingBottom: 12,
     alignItems: "stretch",
+  },
+  graficosColuna: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    flexShrink: 0,
+    width: 360,
+    overflowY: "auto",
+    paddingBottom: 12,
+  },
+  graficoCard: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: "16px 20px",
+    flexShrink: 0,
   },
   coluna: {
     minWidth: 280,

@@ -419,7 +419,7 @@ export default function CosturaInternaPage() {
             </div>
 
             <div style={estilos.graficosColuna}>
-              <div style={{ ...estilos.graficoCard, flex: "2 1 0" }}>
+              <div style={estilos.graficoCard}>
                 <div style={estilos.indicadorTitulo}>Produção Acumulada do Dia</div>
                 <div style={estilos.graficoArea}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -433,7 +433,12 @@ export default function CosturaInternaPage() {
                         tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
                         fontSize={12}
                       />
-                      <YAxis fontSize={12} allowDecimals={false} />
+                      <YAxis
+                        domain={[0, 1600]}
+                        ticks={[0, 200, 400, 600, 800, 1000, 1200, 1400, 1600]}
+                        allowDataOverflow
+                        fontSize={12}
+                      />
                       <Tooltip
                         labelFormatter={(h) => formataHoraFracionada(Number(h))}
                         formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
@@ -450,7 +455,7 @@ export default function CosturaInternaPage() {
                   </ResponsiveContainer>
                 </div>
               </div>
-              <div style={{ ...estilos.graficoCard, flex: "1 1 0" }}>
+              <div style={estilos.graficoCard}>
                 <div style={estilos.indicadorTitulo}>Produção da Semana</div>
                 <div style={estilos.graficoArea}>
                   <ResponsiveContainer width="100%" height="100%">
@@ -1061,8 +1066,8 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
-    flex: 1,
-    minWidth: 0,
+    flexShrink: 0,
+    width: "clamp(320px, 26vw, 420px)",
     paddingBottom: 12,
   },
   graficoCard: {
@@ -1073,6 +1078,7 @@ const estilos: Record<string, React.CSSProperties> = {
     minHeight: 0,
     display: "flex",
     flexDirection: "column",
+    flex: "1 1 0",
   },
   graficoArea: {
     flex: 1,
@@ -1080,11 +1086,11 @@ const estilos: Record<string, React.CSSProperties> = {
     marginTop: 8,
   },
   coluna: {
-    minWidth: 280,
-    maxWidth: 280,
+    flex: "1 1 0",
+    minWidth: 260,
+    maxWidth: 420,
     background: "#eceef2",
     borderRadius: 12,
-    flexShrink: 0,
     display: "flex",
     flexDirection: "column",
     height: "100%",

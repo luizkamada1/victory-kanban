@@ -419,43 +419,54 @@ export default function CosturaInternaPage() {
             </div>
 
             <div style={estilos.graficosColuna}>
-              <div style={estilos.graficoCard}>
+              <div style={{ ...estilos.graficoCard, flex: "2 1 0" }}>
                 <div style={estilos.indicadorTitulo}>Produção Acumulada do Dia</div>
-                <ResponsiveContainer width="100%" height={190}>
-                  <LineChart data={acumuladoDiaData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                      dataKey="hora"
-                      type="number"
-                      domain={[7, 19]}
-                      ticks={[7, 9, 11, 13, 15, 17, 19]}
-                      tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
-                      fontSize={11}
-                    />
-                    <YAxis fontSize={11} allowDecimals={false} />
-                    <Tooltip
-                      labelFormatter={(h) => formataHoraFracionada(Number(h))}
-                      formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
-                    />
-                    <Line type="stepAfter" dataKey="acumulado" stroke="#6366f1" strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
+                <div style={estilos.graficoArea}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={acumuladoDiaData} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis
+                        dataKey="hora"
+                        type="number"
+                        domain={[7, 19]}
+                        ticks={[7, 9, 11, 13, 15, 17, 19]}
+                        tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
+                        fontSize={12}
+                      />
+                      <YAxis fontSize={12} allowDecimals={false} />
+                      <Tooltip
+                        labelFormatter={(h) => formataHoraFracionada(Number(h))}
+                        formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="acumulado"
+                        stroke="#6366f1"
+                        strokeWidth={2.5}
+                        dot={{ r: 3, fill: "#6366f1" }}
+                        activeDot={{ r: 5 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
-              <div style={estilos.graficoCard}>
+              <div style={{ ...estilos.graficoCard, flex: "1 1 0" }}>
                 <div style={estilos.indicadorTitulo}>Produção da Semana</div>
-                <ResponsiveContainer width="100%" height={190}>
-                  <BarChart data={producaoSemana} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis dataKey="dia" fontSize={11} />
-                    <YAxis fontSize={11} allowDecimals={false} />
-                    <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
-                    <Bar dataKey="total" radius={[4, 4, 0, 0]}>
-                      {producaoSemana.map((d, i) => (
-                        <Cell key={i} fill={d.ehHoje ? "#6366f1" : "#c7d2fe"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <div style={estilos.graficoArea}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={producaoSemana} margin={{ top: 12, right: 16, left: 0, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                      <XAxis dataKey="dia" fontSize={12} />
+                      <YAxis fontSize={12} allowDecimals={false} />
+                      <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
+                      <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+                        {producaoSemana.map((d, i) => (
+                          <Cell key={i} fill={d.ehHoje ? "#6366f1" : "#c7d2fe"} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
             </div>
           </div>
@@ -1050,9 +1061,8 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
-    flexShrink: 0,
-    width: 360,
-    overflowY: "auto",
+    flex: 1,
+    minWidth: 0,
     paddingBottom: 12,
   },
   graficoCard: {
@@ -1060,7 +1070,14 @@ const estilos: Record<string, React.CSSProperties> = {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
     padding: "16px 20px",
-    flexShrink: 0,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+  },
+  graficoArea: {
+    flex: 1,
+    minHeight: 0,
+    marginTop: 8,
   },
   coluna: {
     minWidth: 280,

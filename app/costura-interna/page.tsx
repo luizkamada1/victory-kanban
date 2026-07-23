@@ -210,10 +210,40 @@ export default function CosturaInternaPage() {
       const resp = await fetch("/api/producao-celula", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
+        body: JSON.stringify({ id, acao: "concluir" }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Erro ao concluir");
+      carregarProducoes();
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : "Erro desconhecido");
+    }
+  }
+
+  async function desfazerIniciar(id: number) {
+    try {
+      const resp = await fetch("/api/producao-celula", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
+      carregarProducoes();
+    } catch (e: unknown) {
+      setErro(e instanceof Error ? e.message : "Erro desconhecido");
+    }
+  }
+
+  async function desfazerConcluir(id: number) {
+    try {
+      const resp = await fetch("/api/producao-celula", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, acao: "desfazer" }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
       carregarProducoes();
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : "Erro desconhecido");
@@ -292,14 +322,23 @@ export default function CosturaInternaPage() {
               {emAndamentoRows.length === 0 ? (
                 <div style={estilos.colunaVazia}>Sem produção em andamento</div>
               ) : (
-                emAndamentoRows.map((p) => <CardEmAndamento key={p.id} p={p} onConcluir={() => concluir(p.id)} />)
+                emAndamentoRows.map((p) => (
+                  <CardEmAndamento
+                    key={p.id}
+                    p={p}
+                    onConcluir={() => concluir(p.id)}
+                    onDesfazer={() => desfazerIniciar(p.id)}
+                  />
+                ))
               )}
             </ColunaSimples>
             <ColunaSimples titulo="Concluído" total={concluidoRows.length}>
               {concluidoRows.length === 0 ? (
                 <div style={estilos.colunaVazia}>Nenhuma conclusão ainda</div>
               ) : (
-                concluidoRows.map((p) => <CardConcluido key={p.id} p={p} />)
+                concluidoRows.map((p) => (
+                  <CardConcluido key={p.id} p={p} onDesfazer={() => desfazerConcluir(p.id)} />
+                ))
               )}
             </ColunaSimples>
           </div>
@@ -489,7 +528,15 @@ const CardFilaEspera = forwardRef<HTMLDivElement, CardFilaEsperaProps>(function 
   );
 });
 
-function CardEmAndamento({ p, onConcluir }: { p: ProducaoCelula; onConcluir: () => void }) {
+function CardEmAndamento({
+  p,
+  onConcluir,
+  onDesfazer,
+}: {
+  p: ProducaoCelula;
+  onConcluir: () => void;
+  onDesfazer: () => void;
+}) {
   return (
     <div style={estilos.card}>
       <div style={estilos.cardTopo}>
@@ -509,11 +556,14 @@ function CardEmAndamento({ p, onConcluir }: { p: ProducaoCelula; onConcluir: () 
       <button onClick={onConcluir} style={estilos.botaoConcluir}>
         ✓ Concluir
       </button>
+      <button onClick={onDesfazer} style={estilos.botaoDesfazer} title="Desfazer o início desta produção">
+        desfazer início
+      </button>
     </div>
   );
 }
 
-function CardConcluido({ p }: { p: ProducaoCelula }) {
+function CardConcluido({ p, onDesfazer }: { p: ProducaoCelula; onDesfazer: () => void }) {
   return (
     <div style={estilos.card}>
       <div style={estilos.cardTopo}>
@@ -526,6 +576,9 @@ function CardConcluido({ p }: { p: ProducaoCelula }) {
         Célula: <strong>{p.celula}</strong>
       </div>
       {p.data_conclusao && <span style={estilos.badgeVerde}>Concluído {formataDataHora(p.data_conclusao)}</span>}
+      <button onClick={onDesfazer} style={estilos.botaoDesfazer} title="Desfazer a conclusão desta produção">
+        desfazer conclusão
+      </button>
     </div>
   );
 }
@@ -938,6 +991,17 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 11.5,
     fontWeight: 700,
     cursor: "pointer",
+  },
+  botaoDesfazer: {
+    marginTop: 6,
+    width: "100%",
+    background: "transparent",
+    border: "none",
+    padding: "2px 0",
+    fontSize: 10.5,
+    color: "#9ca3af",
+    cursor: "pointer",
+    textDecoration: "underline",
   },
   modalFundo: {
     position: "fixed",

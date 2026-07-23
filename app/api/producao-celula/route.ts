@@ -78,6 +78,7 @@ export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json();
     const id = Number(body.id);
+    const acao = body.acao === "desfazer" ? "desfazer" : "concluir";
     if (!id) {
       return NextResponse.json({ error: "'id' é obrigatório." }, { status: 400 });
     }
@@ -85,7 +86,7 @@ export async function PATCH(req: NextRequest) {
     const supabase = getSupabaseServer();
     const { data: linha, error: buscaError } = await supabase
       .from("producao_celulas")
-      .select("quantidade")
+      .select("op_numero, quantidade, status")
       .eq("id", id)
       .maybeSingle();
     if (buscaError) throw buscaError;
@@ -93,14 +94,88 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Registro não encontrado." }, { status: 404 });
     }
 
-    const { error } = await supabase
+    if (acao === "concluir") {
+      if (linha.status !== "em_andamento") {
+        return NextResponse.json({ error: "Essa produção já está concluída." }, { status: 400 });
+      }
+      const { error } = await supabase
+        .from("producao_celulas")
+        .update({
+          status: "concluido",
+          quantidade_concluida: linha.quantidade,
+          data_conclusao: new Date().toISOString(),
+        })
+        .eq("id", id);
+      if (error) throw error;
+      return NextResponse.json({ ok: true });
+    }
+
+    // acao === "desfazer" — reverte uma conclusão (manual ou automática) pro
+    // estado "em andamento". Só é permitido enquanto a OP ainda está mesmo na
+    // Costura Interna: se a planilha já confirmou que ela seguiu pra outro
+    // setor, "ressuscitar" o registro criaria uma inconsistência com o que o
+    // ERP diz que aconteceu de verdade.
+    if (linha.status !== "concluido") {
+      return NextResponse.json({ error: "Essa produção ainda não foi concluída." }, { status: 400 });
+    }
+    const { data: opAtual, error: opError } = await supabase
+      .from("producao_ops")
+      .select("op_numero")
+      .eq("op_numero", linha.op_numero)
+      .eq("setor", "COSTURA INTERNA")
+      .maybeSingle();
+    if (opError) throw opError;
+    if (!opAtual) {
+      return NextResponse.json(
+        {
+          error:
+            "Não é possível desfazer: essa OP já saiu da Costura Interna numa planilha mais recente.",
+        },
+        { status: 409 }
+      );
+    }
+
+    const { error: desfazerError } = await supabase
       .from("producao_celulas")
-      .update({
-        status: "concluido",
-        quantidade_concluida: linha.quantidade,
-        data_conclusao: new Date().toISOString(),
-      })
+      .update({ status: "em_andamento", quantidade_concluida: 0, data_conclusao: null })
       .eq("id", id);
+    if (desfazerError) throw desfazerError;
+
+    return NextResponse.json({ ok: true });
+  } catch (err: unknown) {
+    return NextResponse.json({ error: extrairMensagem(err) }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const id = Number(body.id);
+    if (!id) {
+      return NextResponse.json({ error: "'id' é obrigatório." }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServer();
+    const { data: linha, error: buscaError } = await supabase
+      .from("producao_celulas")
+      .select("status")
+      .eq("id", id)
+      .maybeSingle();
+    if (buscaError) throw buscaError;
+    if (!linha) {
+      return NextResponse.json({ error: "Registro não encontrado." }, { status: 404 });
+    }
+
+    // Desfaz o "Dar andamento" — só permitido enquanto ainda está em
+    // andamento (se já foi concluída, é preciso desfazer a conclusão antes).
+    if (linha.status !== "em_andamento") {
+      return NextResponse.json(
+        { error: "Essa produção já foi concluída — desfaça a conclusão antes de desfazer o início." },
+        { status: 400 }
+      );
+    }
+
+    const { error } = await supabase.from("producao_celulas").delete().eq("id", id);
     if (error) throw error;
 
     return NextResponse.json({ ok: true });

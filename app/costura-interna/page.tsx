@@ -14,6 +14,18 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import type { OP } from "@/lib/types";
 import { filaKey, formataPrevisao, formataDataHora } from "@/lib/kanban-utils";
 import { useHeaderRecolhido } from "@/lib/useHeaderRecolhido";
@@ -48,6 +60,20 @@ function ehHoje(dataIso: string): boolean {
   );
 }
 
+function ehMesmoDia(a: Date, b: Date): boolean {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+// Converte hora fracionada (ex: 10.75) em "10:45", pro eixo/tooltip do
+// gráfico de produção acumulada do dia.
+function formataHoraFracionada(hora: number): string {
+  const h = Math.floor(hora);
+  const m = Math.round((hora - h) * 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+const DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
+
 export default function CosturaInternaPage() {
   const [ops, setOps] = useState<OP[]>([]);
   const [producoes, setProducoes] = useState<ProducaoCelula[]>([]);
@@ -56,6 +82,7 @@ export default function CosturaInternaPage() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState<string | null>(null);
   const [modalIniciarOp, setModalIniciarOp] = useState<OP | null>(null);
+  const [modalConcluirRow, setModalConcluirRow] = useState<ProducaoCelula | null>(null);
   const [modalCapacidadeAberto, setModalCapacidadeAberto] = useState(false);
   const { recolhido, alternar } = useHeaderRecolhido();
 
@@ -171,6 +198,54 @@ export default function CosturaInternaPage() {
     return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
   }, [concluidosHoje]);
 
+  // Curva de produção acumulada do dia (07h-19h) — degrau que sobe a cada
+  // conclusão e fica horizontal quando não há produção registrada.
+  const acumuladoDiaData = useMemo(() => {
+    const eventos = concluidosHoje
+      .filter((p) => p.data_conclusao)
+      .map((p) => ({ t: new Date(p.data_conclusao!), qtd: p.quantidade_concluida }))
+      .sort((a, b) => a.t.getTime() - b.t.getTime());
+
+    const paraHoraFracionada = (d: Date) => Math.min(19, Math.max(7, d.getHours() + d.getMinutes() / 60));
+
+    const pontos: { hora: number; acumulado: number }[] = [{ hora: 7, acumulado: 0 }];
+    let acumulado = 0;
+    for (const ev of eventos) {
+      acumulado += ev.qtd;
+      pontos.push({ hora: paraHoraFracionada(ev.t), acumulado });
+    }
+    const horaAtual = paraHoraFracionada(new Date());
+    if (pontos[pontos.length - 1].hora < horaAtual) {
+      pontos.push({ hora: horaAtual, acumulado });
+    }
+    return pontos;
+  }, [concluidosHoje]);
+
+  // Produção total por dia da semana atual (segunda a domingo), com o dia de
+  // hoje destacado.
+  const producaoSemana = useMemo(() => {
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    const diaSemanaAtual = hoje.getDay(); // 0 = domingo
+    const offsetParaSegunda = diaSemanaAtual === 0 ? -6 : 1 - diaSemanaAtual;
+    const segunda = new Date(hoje);
+    segunda.setDate(segunda.getDate() + offsetParaSegunda);
+
+    const dias = DIAS_SEMANA.map((label, idx) => {
+      const data = new Date(segunda);
+      data.setDate(segunda.getDate() + idx);
+      return { dia: label, data, total: 0, ehHoje: ehMesmoDia(data, hoje) };
+    });
+
+    for (const p of concluidoRows) {
+      if (!p.data_conclusao) continue;
+      const d = new Date(p.data_conclusao);
+      const item = dias.find((i) => ehMesmoDia(i.data, d));
+      if (item) item.total += p.quantidade_concluida;
+    }
+    return dias;
+  }, [concluidoRows]);
+
   function persistirOrdem(novaOrdem: string[]) {
     setFilaOrdem(novaOrdem);
     fetch("/api/fila", {
@@ -205,15 +280,16 @@ export default function CosturaInternaPage() {
     }
   }
 
-  async function concluir(id: number) {
+  async function confirmarConcluir(id: number, quantidade: number) {
     try {
       const resp = await fetch("/api/producao-celula", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, acao: "concluir" }),
+        body: JSON.stringify({ id, acao: "concluir", quantidade }),
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || "Erro ao concluir");
+      setModalConcluirRow(null);
       carregarProducoes();
     } catch (e: unknown) {
       setErro(e instanceof Error ? e.message : "Erro desconhecido");
@@ -292,20 +368,59 @@ export default function CosturaInternaPage() {
               {ultimaAtualizacaoHoje ? formataDataHora(ultimaAtualizacaoHoje) : "nenhuma conclusão hoje ainda"}
             </div>
           </div>
-          <div style={estilos.indicadorCard}>
-            <div style={estilos.indicadorTitulo}>Produção por Célula</div>
-            {producaoPorCelulaHoje.length === 0 ? (
+          {producaoPorCelulaHoje.length === 0 ? (
+            <div style={estilos.indicadorCard}>
+              <div style={estilos.indicadorTitulo}>Produção por Célula</div>
               <div style={estilos.indicadorRodape}>Nenhuma conclusão hoje ainda</div>
-            ) : (
-              <div style={estilos.celulaLista}>
-                {producaoPorCelulaHoje.map(([celula, qtd]) => (
-                  <div key={celula} style={estilos.celulaLinha}>
-                    <span>{celula}</span>
-                    <strong>{qtd.toLocaleString("pt-BR")} peças</strong>
-                  </div>
-                ))}
+            </div>
+          ) : (
+            producaoPorCelulaHoje.map(([celula, qtd]) => (
+              <div key={celula} style={estilos.indicadorCard}>
+                <div style={estilos.indicadorTitulo}>{celula}</div>
+                <div style={estilos.indicadorValor}>{qtd.toLocaleString("pt-BR")} peças</div>
               </div>
-            )}
+            ))
+          )}
+        </div>
+
+        <div style={estilos.graficosRow}>
+          <div style={estilos.graficoCard}>
+            <div style={estilos.indicadorTitulo}>Produção Acumulada do Dia</div>
+            <ResponsiveContainer width="100%" height={190}>
+              <LineChart data={acumuladoDiaData} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="hora"
+                  type="number"
+                  domain={[7, 19]}
+                  ticks={[7, 9, 11, 13, 15, 17, 19]}
+                  tickFormatter={(h) => `${String(h).padStart(2, "0")}:00`}
+                  fontSize={11}
+                />
+                <YAxis fontSize={11} allowDecimals={false} />
+                <Tooltip
+                  labelFormatter={(h) => formataHoraFracionada(Number(h))}
+                  formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`}
+                />
+                <Line type="stepAfter" dataKey="acumulado" stroke="#6366f1" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <div style={estilos.graficoCard}>
+            <div style={estilos.indicadorTitulo}>Produção da Semana</div>
+            <ResponsiveContainer width="100%" height={190}>
+              <BarChart data={producaoSemana} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis dataKey="dia" fontSize={11} />
+                <YAxis fontSize={11} allowDecimals={false} />
+                <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
+                <Bar dataKey="total" radius={[4, 4, 0, 0]}>
+                  {producaoSemana.map((d, i) => (
+                    <Cell key={i} fill={d.ehHoje ? "#6366f1" : "#c7d2fe"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
@@ -326,7 +441,7 @@ export default function CosturaInternaPage() {
                   <CardEmAndamento
                     key={p.id}
                     p={p}
-                    onConcluir={() => concluir(p.id)}
+                    onConcluir={() => setModalConcluirRow(p)}
                     onDesfazer={() => desfazerIniciar(p.id)}
                   />
                 ))
@@ -352,6 +467,14 @@ export default function CosturaInternaPage() {
           celulas={celulas}
           onFechar={() => setModalIniciarOp(null)}
           onConfirmar={confirmarIniciar}
+        />
+      )}
+
+      {modalConcluirRow && (
+        <ModalConcluir
+          p={modalConcluirRow}
+          onFechar={() => setModalConcluirRow(null)}
+          onConfirmar={(quantidade) => confirmarConcluir(modalConcluirRow.id, quantidade)}
         />
       )}
 
@@ -670,6 +793,59 @@ function ModalIniciar({
   );
 }
 
+function ModalConcluir({
+  p,
+  onFechar,
+  onConfirmar,
+}: {
+  p: ProducaoCelula;
+  onFechar: () => void;
+  onConfirmar: (quantidade: number) => void;
+}) {
+  const [quantidade, setQuantidade] = useState<number>(0);
+  const valido = quantidade > 0 && quantidade <= p.quantidade;
+
+  function confirmar() {
+    if (!valido) return;
+    onConfirmar(quantidade);
+  }
+
+  return (
+    <div style={estilos.modalFundo} onClick={onFechar}>
+      <div style={estilos.modalCaixa} onClick={(e) => e.stopPropagation()}>
+        <h2 style={estilos.modalTitulo}>Concluir produção — OP {p.op_numero}</h2>
+        <p style={estilos.modalSubtitulo}>
+          {p.codigo} · {p.produto} · Célula {p.celula} · {p.quantidade.toLocaleString("pt-BR")} pç em andamento
+        </p>
+
+        <label style={estilos.modalLabel}>Quantidade concluída</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="number"
+            min={1}
+            max={p.quantidade}
+            value={quantidade || ""}
+            onChange={(e) => setQuantidade(Number(e.target.value))}
+            style={{ ...estilos.modalInput, flex: 1 }}
+          />
+          <button onClick={() => setQuantidade(p.quantidade)} style={estilos.botaoTotal}>
+            Tudo
+          </button>
+        </div>
+
+        <div style={estilos.modalBotoes}>
+          <button onClick={onFechar} style={estilos.botaoSecundario}>
+            Cancelar
+          </button>
+          <button onClick={confirmar} disabled={!valido} style={estilos.botaoPrimario}>
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ModalCapacidadeCelulas({
   celulasIniciais,
   onFechar,
@@ -835,10 +1011,10 @@ const estilos: Record<string, React.CSSProperties> = {
     fontSize: 13.5,
   },
   indicadores: {
-    display: "flex",
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
     gap: 14,
-    flexWrap: "wrap",
-    marginBottom: 20,
+    marginBottom: 14,
     flexShrink: 0,
   },
   indicadorCard: {
@@ -846,18 +1022,25 @@ const estilos: Record<string, React.CSSProperties> = {
     border: "1px solid #e5e7eb",
     borderRadius: 12,
     padding: "16px 20px",
-    minWidth: 240,
-    flex: "1 1 260px",
+    minWidth: 0,
   },
   indicadorTitulo: { fontSize: 12.5, fontWeight: 700, color: "#6b7280", textTransform: "uppercase" },
-  indicadorValor: { fontSize: 26, fontWeight: 800, color: "#111827", marginTop: 6 },
+  indicadorValor: { fontSize: 30, fontWeight: 800, color: "#111827", marginTop: 6 },
   indicadorRodape: { fontSize: 12, color: "#9ca3af", marginTop: 8 },
-  celulaLista: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
-  celulaLinha: {
+  graficosRow: {
     display: "flex",
-    justifyContent: "space-between",
-    fontSize: 13,
-    color: "#374151",
+    gap: 14,
+    flexWrap: "wrap",
+    marginBottom: 20,
+    flexShrink: 0,
+  },
+  graficoCard: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    padding: "16px 20px",
+    flex: "1 1 380px",
+    minWidth: 0,
   },
   estadoVazio: { textAlign: "center", padding: 60, color: "#6b7280", fontSize: 14 },
   quadro: {

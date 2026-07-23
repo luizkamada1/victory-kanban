@@ -86,7 +86,7 @@ export async function PATCH(req: NextRequest) {
     const supabase = getSupabaseServer();
     const { data: linha, error: buscaError } = await supabase
       .from("producao_celulas")
-      .select("op_numero, quantidade, status")
+      .select("op_numero, codigo, produto, celula, tipo_peca, quantidade, data_inicio, previsao_alvo, status")
       .eq("id", id)
       .maybeSingle();
     if (buscaError) throw buscaError;
@@ -98,15 +98,53 @@ export async function PATCH(req: NextRequest) {
       if (linha.status !== "em_andamento") {
         return NextResponse.json({ error: "Essa produção já está concluída." }, { status: 400 });
       }
-      const { error } = await supabase
+      const quantidadeConcluida = Number(body.quantidade);
+      if (!Number.isFinite(quantidadeConcluida) || quantidadeConcluida <= 0) {
+        return NextResponse.json({ error: "Informe uma quantidade concluída maior que zero." }, { status: 400 });
+      }
+      if (quantidadeConcluida > linha.quantidade) {
+        return NextResponse.json(
+          { error: "A quantidade concluída não pode ser maior que a quantidade em andamento." },
+          { status: 400 }
+        );
+      }
+
+      const agora = new Date().toISOString();
+
+      if (quantidadeConcluida === linha.quantidade) {
+        // Concluiu o lote inteiro: o próprio registro vira "concluido".
+        const { error } = await supabase
+          .from("producao_celulas")
+          .update({ status: "concluido", quantidade_concluida: linha.quantidade, data_conclusao: agora })
+          .eq("id", id);
+        if (error) throw error;
+        return NextResponse.json({ ok: true });
+      }
+
+      // Conclusão parcial: reduz a quantidade que continua em andamento e
+      // registra a parte concluída como um novo lote independente — assim o
+      // lote original permanece ativo com o restante.
+      const { error: reduzError } = await supabase
         .from("producao_celulas")
-        .update({
-          status: "concluido",
-          quantidade_concluida: linha.quantidade,
-          data_conclusao: new Date().toISOString(),
-        })
+        .update({ quantidade: linha.quantidade - quantidadeConcluida })
         .eq("id", id);
-      if (error) throw error;
+      if (reduzError) throw reduzError;
+
+      const { error: insertError } = await supabase.from("producao_celulas").insert({
+        op_numero: linha.op_numero,
+        codigo: linha.codigo,
+        produto: linha.produto,
+        celula: linha.celula,
+        tipo_peca: linha.tipo_peca,
+        quantidade: quantidadeConcluida,
+        data_inicio: linha.data_inicio,
+        previsao_alvo: linha.previsao_alvo,
+        status: "concluido",
+        quantidade_concluida: quantidadeConcluida,
+        data_conclusao: agora,
+      });
+      if (insertError) throw insertError;
+
       return NextResponse.json({ ok: true });
     }
 

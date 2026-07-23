@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import { SETORES_ORDEM } from "@/lib/setores";
 import type { OP } from "@/lib/types";
 import { normaliza, abreviaOficina, filaKey } from "@/lib/kanban-utils";
-import { KanbanColuna } from "@/components/KanbanColuna";
+import { KanbanColuna, type ProducaoIndicador } from "@/components/KanbanColuna";
 
 const REFRESH_MS = 5 * 60 * 1000; // 5 minutos
 const STORAGE_KEY = "victory_kanban_setores_visiveis";
@@ -34,9 +34,7 @@ export default function KanbanPage() {
   const [capacidadeOficinas, setCapacidadeOficinas] = useState<Record<string, number>>({});
   const [oficinasVisiveis, setOficinasVisiveis] = useState(true);
   const [filaOrdem, setFilaOrdem] = useState<Record<string, string[]>>({});
-  const [iniciosProducao, setIniciosProducao] = useState<
-    Record<string, Record<string, { dataInicio: string; previsaoAlvo: string | null }>>
-  >({});
+  const [producaoPorOp, setProducaoPorOp] = useState<Record<string, ProducaoIndicador>>({});
 
   useEffect(() => {
     const salvo = window.localStorage.getItem(STORAGE_KEY);
@@ -103,12 +101,26 @@ export default function KanbanPage() {
     }
   }, []);
 
-  const carregarIniciosProducao = useCallback(async () => {
+  const carregarProducaoCelulas = useCallback(async () => {
     try {
-      const resp = await fetch("/api/inicio-producao", { cache: "no-store" });
+      const resp = await fetch("/api/producao-celula", { cache: "no-store" });
       const data = await resp.json();
       if (!resp.ok) return;
-      setIniciosProducao(data.inicios || {});
+      type LinhaProducaoCelula = { op_numero: string; status: string; previsao_alvo: string | null };
+      const linhas: LinhaProducaoCelula[] = data.producoes || [];
+      const porOp: Record<string, ProducaoIndicador> = {};
+      for (const linha of linhas) {
+        if (linha.status !== "em_andamento") continue;
+        const atual = porOp[linha.op_numero] ?? { emAndamento: false, dataAlvo: null };
+        atual.emAndamento = true;
+        // Quando a mesma OP está em produção em mais de uma célula, mostra a
+        // Data Alvo mais distante (pior caso — quando a OP estará 100% pronta).
+        if (linha.previsao_alvo && (!atual.dataAlvo || linha.previsao_alvo > atual.dataAlvo)) {
+          atual.dataAlvo = linha.previsao_alvo;
+        }
+        porOp[linha.op_numero] = atual;
+      }
+      setProducaoPorOp(porOp);
     } catch {
       // informativo; falha aqui não deve travar o kanban
     }
@@ -118,8 +130,8 @@ export default function KanbanPage() {
     carregarDados();
     carregarCapacidade();
     carregarFila();
-    carregarIniciosProducao();
-  }, [carregarDados, carregarCapacidade, carregarFila, carregarIniciosProducao]);
+    carregarProducaoCelulas();
+  }, [carregarDados, carregarCapacidade, carregarFila, carregarProducaoCelulas]);
 
   useEffect(() => {
     atualizarTudo();
@@ -135,35 +147,6 @@ export default function KanbanPage() {
       body: JSON.stringify({ setor, ordem: novaOrdem }),
     }).catch(() => {
       // se falhar, a próxima carregarFila() volta pro estado salvo no banco
-    });
-  }
-
-  function iniciarProducao(setor: string, chave: string, previsaoAlvo: string | null) {
-    setIniciosProducao((atual) => ({
-      ...atual,
-      [setor]: { ...atual[setor], [chave]: { dataInicio: new Date().toISOString(), previsaoAlvo } },
-    }));
-    fetch("/api/inicio-producao", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setor, chave, previsaoAlvo }),
-    }).catch(() => {
-      // se falhar, a próxima carregarIniciosProducao() volta pro estado salvo no banco
-    });
-  }
-
-  function desfazerInicioProducao(setor: string, chave: string) {
-    setIniciosProducao((atual) => {
-      const copiaSetor = { ...atual[setor] };
-      delete copiaSetor[chave];
-      return { ...atual, [setor]: copiaSetor };
-    });
-    fetch("/api/inicio-producao", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setor, chave }),
-    }).catch(() => {
-      // se falhar, a próxima carregarIniciosProducao() volta pro estado salvo no banco
     });
   }
 
@@ -332,9 +315,7 @@ export default function KanbanPage() {
                   oficinasVisiveis={oficinasVisiveis}
                   onToggleOficinasVisiveis={() => setOficinasVisiveis((v) => !v)}
                   onReordenar={persistirOrdem}
-                  iniciosProducao={iniciosProducao[setor] ?? {}}
-                  onIniciar={iniciarProducao}
-                  onDesfazerInicio={desfazerInicioProducao}
+                  producaoPorOp={producaoPorOp}
                 />
               );
             })}

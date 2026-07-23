@@ -8,24 +8,12 @@ type Props = {
   op: OP;
   cor: string;
   dias: number | null;
-  previsao: Date | null;
   mostrarOficina: boolean;
-  dataInicio?: string | null;
-  onIniciar?: () => void;
-  onDesfazerInicio?: () => void;
+  emAndamento?: boolean;
+  dataAlvo?: Date | null;
 };
 
-export function SortableKanbanCard({
-  id,
-  op,
-  cor,
-  dias,
-  previsao,
-  mostrarOficina,
-  dataInicio,
-  onIniciar,
-  onDesfazerInicio,
-}: Props) {
+export function SortableKanbanCard({ id, op, cor, dias, mostrarOficina, emAndamento, dataAlvo }: Props) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id,
   });
@@ -36,12 +24,10 @@ export function SortableKanbanCard({
       op={op}
       cor={cor}
       dias={dias}
-      previsao={previsao}
       mostrarOficina={mostrarOficina}
       isDragging={isDragging}
-      dataInicio={dataInicio}
-      onIniciar={onIniciar}
-      onDesfazerInicio={onDesfazerInicio}
+      emAndamento={emAndamento}
+      dataAlvo={dataAlvo}
       style={{
         transform: CSS.Transform.toString(transform),
         transition: transition ?? "transform 200ms ease",

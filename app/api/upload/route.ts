@@ -190,6 +190,20 @@ export async function POST(req: NextRequest) {
       .filter((antiga) => !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina)))
       .map((antiga) => ({ setor: antiga.setor, chave: `${antiga.op_numero}::${antiga.oficina ?? ""}` }));
 
+    // Rede de segurança pra Costura Interna: se a OP saiu inteiramente do
+    // setor mas ainda havia célula(s) "em andamento" sem confirmação manual,
+    // conclui automaticamente — a produção não pode continuar "em andamento"
+    // pra uma OP que a planilha já não mostra mais na Costura Interna. A
+    // atribuição de qual célula concluiu continua sendo feita manualmente
+    // pelo botão "Concluir" quando isso acontece antes do próximo upload.
+    const opsQueSairamDaCosturaInterna = (linhasAntigas ?? [])
+      .filter(
+        (antiga) =>
+          antiga.setor === "COSTURA INTERNA" &&
+          !chavesNovas.has(chaveTransicao(antiga.op_numero, antiga.setor, antiga.oficina))
+      )
+      .map((antiga) => antiga.op_numero);
+
     // Transições parciais: a linha (op+setor+oficina) continua existindo, só que
     // com menos peças do que antes — a diferença já saiu desse setor (avançou
     // pra outro), mesmo sem a OP desaparecer inteira dali. Sem isso, mover só
@@ -225,6 +239,28 @@ export async function POST(req: NextRequest) {
           supabase.from("op_inicio_producao").delete().eq("setor", setor).eq("chave", chave)
         )
       );
+    }
+
+    if (opsQueSairamDaCosturaInterna.length > 0) {
+      const { data: abertas } = await supabase
+        .from("producao_celulas")
+        .select("id, quantidade")
+        .in("op_numero", opsQueSairamDaCosturaInterna)
+        .eq("status", "em_andamento");
+      if (abertas && abertas.length > 0) {
+        await Promise.all(
+          abertas.map((linha) =>
+            supabase
+              .from("producao_celulas")
+              .update({
+                status: "concluido",
+                quantidade_concluida: linha.quantidade,
+                data_conclusao: new Date().toISOString(),
+              })
+              .eq("id", linha.id)
+          )
+        );
+      }
     }
 
     return NextResponse.json({ ok: true, total_ops: linhas.length });

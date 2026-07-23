@@ -13,19 +13,11 @@ import {
 import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import type { OP } from "@/lib/types";
 import { SETORES_COM_OFICINA, SETORES_COM_CAPACIDADE } from "@/lib/setores";
-import {
-  diasNoSetor,
-  corAlerta,
-  corOcupacao,
-  abreviaOficina,
-  filaKey,
-  addDiasUteis,
-  calcPrevisaoAlvo,
-} from "@/lib/kanban-utils";
+import { diasNoSetor, corAlerta, corOcupacao, abreviaOficina, filaKey } from "@/lib/kanban-utils";
 import { KanbanCard } from "./KanbanCard";
 import { SortableKanbanCard } from "./SortableKanbanCard";
 
-type InicioProducao = { dataInicio: string; previsaoAlvo: string | null };
+export type ProducaoIndicador = { emAndamento: boolean; dataAlvo: string | null };
 
 type Props = {
   setor: string;
@@ -35,9 +27,7 @@ type Props = {
   oficinasVisiveis: boolean;
   onToggleOficinasVisiveis: () => void;
   onReordenar: (setor: string, novaOrdemChaves: string[]) => void;
-  iniciosProducao: Record<string, InicioProducao>;
-  onIniciar: (setor: string, chave: string, previsaoAlvo: string | null) => void;
-  onDesfazerInicio: (setor: string, chave: string) => void;
+  producaoPorOp: Record<string, ProducaoIndicador>;
 };
 
 export function KanbanColuna({
@@ -48,9 +38,7 @@ export function KanbanColuna({
   oficinasVisiveis,
   onToggleOficinasVisiveis,
   onReordenar,
-  iniciosProducao,
-  onIniciar,
-  onDesfazerInicio,
+  producaoPorOp,
 }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -61,7 +49,6 @@ export function KanbanColuna({
 
   const totalPecasSetor = cards.reduce((acc, op) => acc + (op.quantidade || 0), 0);
   const mostrarOficina = SETORES_COM_OFICINA.includes(setor);
-  const permiteIniciar = (SETORES_COM_CAPACIDADE as readonly string[]).includes(setor);
 
   let capacidadeSetor: number | null = null;
   if ((SETORES_COM_CAPACIDADE as readonly string[]).includes(setor)) {
@@ -94,51 +81,22 @@ export function KanbanColuna({
           .sort((a, b) => (b.ocupOficina ?? -1) - (a.ocupOficina ?? -1))
       : [];
 
-  // Calcula cor/dias/previsão de cada card na ordem atual de exibição.
-  let acumuladoColuna = 0;
-  const acumuladoPorOficina: Record<string, number> = {};
+  // Calcula cor/dias de cada card, e busca o indicador de produção (vindo da
+  // tela exclusiva de célula, hoje só populado pra Costura Interna).
   const cardsComputados = cards.map((op) => {
     const dias = diasNoSetor(op.data_envio_fase);
     const cor = corAlerta(dias);
     const chave = filaKey(op);
-    const inicio = iniciosProducao[chave] ?? null;
-    const dataInicio = inicio?.dataInicio ?? null;
+    const producao = producaoPorOp[op.op_numero] ?? null;
 
-    const capAplicavel =
-      setor === "COSTURA EXTERNA" && op.oficina
-        ? capacidadeOficinas[op.oficina] ?? 0
-        : capacidadeSetor ?? 0;
-
-    // A fila acumulada sempre soma a quantidade de TODAS as OPs do setor/
-    // oficina, mesmo as já iniciadas — afinal elas continuam ocupando
-    // capacidade até saírem de fato, então precisam contar na estimativa das
-    // OPs que estão atrás delas na fila.
-    let diasNecessariosFila: number | null = null;
-    if (setor === "COSTURA EXTERNA" && op.oficina) {
-      acumuladoPorOficina[op.oficina] = (acumuladoPorOficina[op.oficina] ?? 0) + (op.quantidade || 0);
-      if (capAplicavel > 0) {
-        diasNecessariosFila = Math.ceil(acumuladoPorOficina[op.oficina] / capAplicavel);
-      }
-    } else if (capacidadeSetor !== null && capacidadeSetor > 0) {
-      acumuladoColuna += op.quantidade || 0;
-      diasNecessariosFila = Math.ceil(acumuladoColuna / capacidadeSetor);
-    }
-
-    let previsao: Date | null = null;
-    if (dataInicio) {
-      // Já iniciada: previsão-alvo CONGELADA no momento do clique em "Iniciar"
-      // — não recalcula com a quantidade/capacidade atuais, senão não dá pra
-      // saber depois se entregou antes ou depois do previsto.
-      if (inicio?.previsaoAlvo) previsao = new Date(inicio.previsaoAlvo);
-    } else if (diasNecessariosFila !== null) {
-      // Ainda não iniciada: estimativa a partir de hoje, considerando a fila
-      // acumulada até essa OP (setor/oficina inteiro à frente dela).
-      // "dias necessários" de 1 significa "cabe na capacidade de hoje" — por
-      // isso subtrai 1 antes de somar à data de hoje (dia 1 = hoje, não amanhã).
-      previsao = addDiasUteis(new Date(), Math.max(0, diasNecessariosFila - 1));
-    }
-
-    return { op, chave, cor, dias, previsao, dataInicio };
+    return {
+      op,
+      chave,
+      cor,
+      dias,
+      emAndamento: producao?.emAndamento ?? false,
+      dataAlvo: producao?.dataAlvo ? new Date(producao.dataAlvo) : null,
+    };
   });
 
   const cardAtivo = cardsComputados.find((c) => c.chave === activeId);
@@ -161,7 +119,15 @@ export function KanbanColuna({
   return (
     <div style={estilos.coluna}>
       <div style={estilos.colunaHeader}>
-        <div style={estilos.colunaTitulo}>{setor}</div>
+        <div style={estilos.colunaTitulo}>
+          {setor === "COSTURA INTERNA" ? (
+            <a href="/costura-interna" style={estilos.colunaTituloLink} title="Abrir tela exclusiva da Costura Interna">
+              {setor} ↗
+            </a>
+          ) : (
+            setor
+          )}
+        </div>
         <div style={estilos.colunaStats}>
           <span style={estilos.colunaBadge}>
             {cards.length} OP{cards.length === 1 ? "" : "s"}
@@ -246,29 +212,16 @@ export function KanbanColuna({
               items={cardsComputados.map((c) => c.chave)}
               strategy={verticalListSortingStrategy}
             >
-              {cardsComputados.map(({ op, chave, cor, dias, previsao, dataInicio }) => (
+              {cardsComputados.map(({ op, chave, cor, dias, emAndamento, dataAlvo }) => (
                 <SortableKanbanCard
                   key={op.id}
                   id={chave}
                   op={op}
                   cor={cor}
                   dias={dias}
-                  previsao={previsao}
                   mostrarOficina={mostrarOficina}
-                  dataInicio={dataInicio}
-                  onIniciar={
-                    permiteIniciar
-                      ? () => {
-                          const capAplicavel =
-                            setor === "COSTURA EXTERNA" && op.oficina
-                              ? capacidadeOficinas[op.oficina] ?? 0
-                              : capacidadeSetor ?? 0;
-                          const alvo = calcPrevisaoAlvo(new Date(), op.quantidade || 0, capAplicavel);
-                          onIniciar(setor, chave, alvo ? alvo.toISOString() : null);
-                        }
-                      : undefined
-                  }
-                  onDesfazerInicio={() => onDesfazerInicio(setor, chave)}
+                  emAndamento={emAndamento}
+                  dataAlvo={dataAlvo}
                 />
               ))}
             </SortableContext>
@@ -278,9 +231,9 @@ export function KanbanColuna({
                   op={cardAtivo.op}
                   cor={cardAtivo.cor}
                   dias={cardAtivo.dias}
-                  previsao={cardAtivo.previsao}
                   mostrarOficina={mostrarOficina}
-                  dataInicio={cardAtivo.dataInicio}
+                  emAndamento={cardAtivo.emAndamento}
+                  dataAlvo={cardAtivo.dataAlvo}
                   isOverlay
                 />
               )}
@@ -314,6 +267,10 @@ const estilos: Record<string, React.CSSProperties> = {
     color: "#1f2937",
     textTransform: "uppercase",
     letterSpacing: 0.3,
+  },
+  colunaTituloLink: {
+    color: "#4338ca",
+    textDecoration: "none",
   },
   colunaStats: {
     display: "flex",

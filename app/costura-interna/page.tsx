@@ -27,7 +27,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import type { OP } from "@/lib/types";
-import { filaKey, formataPrevisao, formataDataHora } from "@/lib/kanban-utils";
+import { filaKey, formataPrevisao, formataDataHora, normaliza } from "@/lib/kanban-utils";
 import { useHeaderRecolhido } from "@/lib/useHeaderRecolhido";
 
 const SETOR = "COSTURA INTERNA";
@@ -85,6 +85,8 @@ export default function CosturaInternaPage() {
   const [modalConcluirRow, setModalConcluirRow] = useState<ProducaoCelula | null>(null);
   const [modalCapacidadeAberto, setModalCapacidadeAberto] = useState(false);
   const [idsEmProcessamento, setIdsEmProcessamento] = useState<Set<number>>(new Set());
+  const [movimentacaoConfirmadaPorOp, setMovimentacaoConfirmadaPorOp] = useState<Record<string, number>>({});
+  const [busca, setBusca] = useState("");
   const { recolhido, alternar } = useHeaderRecolhido();
 
   const carregarOps = useCallback(async () => {
@@ -134,12 +136,26 @@ export default function CosturaInternaPage() {
     }
   }, []);
 
+  const carregarMovimentacaoConfirmada = useCallback(async () => {
+    try {
+      const resp = await fetch(`/api/movimentacao-confirmada?setor=${encodeURIComponent(SETOR)}`, {
+        cache: "no-store",
+      });
+      const data = await resp.json();
+      if (!resp.ok) return;
+      setMovimentacaoConfirmadaPorOp(data.porOp || {});
+    } catch {
+      // informativo
+    }
+  }, []);
+
   const atualizarTudo = useCallback(() => {
     carregarOps();
     carregarProducoes();
     carregarCelulas();
     carregarFila();
-  }, [carregarOps, carregarProducoes, carregarCelulas, carregarFila]);
+    carregarMovimentacaoConfirmada();
+  }, [carregarOps, carregarProducoes, carregarCelulas, carregarFila, carregarMovimentacaoConfirmada]);
 
   useEffect(() => {
     atualizarTudo();
@@ -149,13 +165,35 @@ export default function CosturaInternaPage() {
 
   const opsCosturaInterna = useMemo(() => ops.filter((op) => op.setor === SETOR), [ops]);
 
-  // OPs que ainda aparecem na Costura Interna segundo a última planilha — se
-  // uma produção já foi concluída aqui mas a OP dela ainda está nesse
-  // conjunto, a movimentação correspondente ainda não chegou no ERP.
-  const opNumerosAindaNoSetor = useMemo(
-    () => new Set(opsCosturaInterna.map((op) => op.op_numero)),
-    [opsCosturaInterna]
-  );
+  const buscaNormalizada = normaliza(busca.trim());
+  function opBate(opNumero: string, codigo: string | null): boolean {
+    if (!buscaNormalizada) return true;
+    return normaliza(opNumero).includes(buscaNormalizada) || normaliza(codigo || "").includes(buscaNormalizada);
+  }
+
+  // Pendência de movimentação: soma quanto essa OP já foi marcada como
+  // concluída aqui na tela (em qualquer célula) e compara com quanto a
+  // planilha já confirmou que saiu desse setor (historico_transicoes). Se o
+  // valor concluído na tela for maior, ainda falta registrar a movimentação
+  // no ERP — mesmo que a OP tenha saído só parcialmente (o restante ainda
+  // aparecendo no setor não conta como pendência, só a parte não refletida).
+  const totalConcluidoPorOp = useMemo(() => {
+    const mapa: Record<string, number> = {};
+    for (const p of producoes) {
+      if (p.status !== "concluido") continue;
+      mapa[p.op_numero] = (mapa[p.op_numero] ?? 0) + p.quantidade_concluida;
+    }
+    return mapa;
+  }, [producoes]);
+
+  const opNumerosComPendencia = useMemo(() => {
+    const pendentes = new Set<string>();
+    for (const [opNumero, totalConcluido] of Object.entries(totalConcluidoPorOp)) {
+      const confirmado = movimentacaoConfirmadaPorOp[opNumero] ?? 0;
+      if (totalConcluido > confirmado) pendentes.add(opNumero);
+    }
+    return pendentes;
+  }, [totalConcluidoPorOp, movimentacaoConfirmadaPorOp]);
 
   const emAndamentoPorOp = useMemo(() => {
     const mapa: Record<string, number> = {};
@@ -179,6 +217,12 @@ export default function CosturaInternaPage() {
     });
   }, [opsCosturaInterna, emAndamentoPorOp, filaOrdem]);
 
+  const filaEsperaFiltrada = useMemo(
+    () => filaEspera.filter((l) => opBate(l.op.op_numero, l.op.codigo)),
+    [filaEspera, buscaNormalizada]
+  );
+  const totalPecasFilaEspera = filaEsperaFiltrada.reduce((acc, l) => acc + l.restante, 0);
+
   const emAndamentoRows = useMemo(
     () =>
       producoes
@@ -194,6 +238,18 @@ export default function CosturaInternaPage() {
         .sort((a, b) => new Date(b.data_conclusao!).getTime() - new Date(a.data_conclusao!).getTime()),
     [producoes]
   );
+
+  const emAndamentoFiltrado = useMemo(
+    () => emAndamentoRows.filter((p) => opBate(p.op_numero, p.codigo)),
+    [emAndamentoRows, buscaNormalizada]
+  );
+  const totalPecasEmAndamento = emAndamentoFiltrado.reduce((acc, p) => acc + p.quantidade, 0);
+
+  const concluidoFiltrado = useMemo(
+    () => concluidoRows.filter((p) => opBate(p.op_numero, p.codigo)),
+    [concluidoRows, buscaNormalizada]
+  );
+  const totalPecasConcluido = concluidoFiltrado.reduce((acc, p) => acc + p.quantidade_concluida, 0);
 
   const concluidosHoje = useMemo(
     () => concluidoRows.filter((p) => p.data_conclusao && ehHoje(p.data_conclusao)),
@@ -388,6 +444,24 @@ export default function CosturaInternaPage() {
             </button>
           </div>
         </div>
+
+        {!recolhido && (
+          <div style={estilos.buscaWrapper}>
+            <span style={estilos.buscaIcone}>⌕</span>
+            <input
+              type="text"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar por OP ou referência do produto..."
+              style={estilos.buscaInput}
+            />
+            {busca && (
+              <button onClick={() => setBusca("")} style={estilos.buscaLimpar} aria-label="Limpar busca">
+                ×
+              </button>
+            )}
+          </div>
+        )}
       </header>
 
       <main style={estilos.main}>
@@ -427,15 +501,20 @@ export default function CosturaInternaPage() {
           <div style={estilos.conteudoPrincipal}>
             <div style={estilos.quadro}>
               <ColunaFilaEspera
-                linhas={filaEspera}
+                linhas={filaEsperaFiltrada}
+                totalPecas={totalPecasFilaEspera}
                 onReordenar={persistirOrdem}
                 onIniciar={(op) => setModalIniciarOp(op)}
               />
-              <ColunaSimples titulo="Em Andamento" total={emAndamentoRows.length}>
-                {emAndamentoRows.length === 0 ? (
+              <ColunaSimples
+                titulo="Em Andamento"
+                total={emAndamentoFiltrado.length}
+                totalPecas={totalPecasEmAndamento}
+              >
+                {emAndamentoFiltrado.length === 0 ? (
                   <div style={estilos.colunaVazia}>Sem produção em andamento</div>
                 ) : (
-                  emAndamentoRows.map((p) => (
+                  emAndamentoFiltrado.map((p) => (
                     <CardEmAndamento
                       key={p.id}
                       p={p}
@@ -446,15 +525,15 @@ export default function CosturaInternaPage() {
                   ))
                 )}
               </ColunaSimples>
-              <ColunaSimples titulo="Concluído" total={concluidoRows.length}>
-                {concluidoRows.length === 0 ? (
+              <ColunaSimples titulo="Concluído" total={concluidoFiltrado.length} totalPecas={totalPecasConcluido}>
+                {concluidoFiltrado.length === 0 ? (
                   <div style={estilos.colunaVazia}>Nenhuma conclusão ainda</div>
                 ) : (
-                  concluidoRows.map((p) => (
+                  concluidoFiltrado.map((p) => (
                     <CardConcluido
                       key={p.id}
                       p={p}
-                      pendente={opNumerosAindaNoSetor.has(p.op_numero)}
+                      pendente={opNumerosComPendencia.has(p.op_numero)}
                       desabilitado={idsEmProcessamento.has(p.id)}
                       onDesfazer={() => desfazerConcluir(p.id)}
                     />
@@ -558,19 +637,24 @@ export default function CosturaInternaPage() {
 function ColunaSimples({
   titulo,
   total,
+  totalPecas,
   children,
 }: {
   titulo: string;
   total: number;
+  totalPecas: number;
   children: React.ReactNode;
 }) {
   return (
     <div style={estilos.coluna}>
       <div style={estilos.colunaHeader}>
         <div style={estilos.colunaTitulo}>{titulo}</div>
-        <span style={estilos.colunaBadge}>
-          {total} {total === 1 ? "item" : "itens"}
-        </span>
+        <div style={estilos.colunaStats}>
+          <span style={estilos.colunaBadge}>
+            {total} {total === 1 ? "item" : "itens"}
+          </span>
+          <span style={estilos.colunaBadge}>{totalPecas.toLocaleString("pt-BR")} pç</span>
+        </div>
       </div>
       <div style={estilos.colunaCorpo}>{children}</div>
     </div>
@@ -579,10 +663,12 @@ function ColunaSimples({
 
 function ColunaFilaEspera({
   linhas,
+  totalPecas,
   onReordenar,
   onIniciar,
 }: {
   linhas: { op: OP; restante: number }[];
+  totalPecas: number;
   onReordenar: (novaOrdem: string[]) => void;
   onIniciar: (op: OP) => void;
 }) {
@@ -612,9 +698,12 @@ function ColunaFilaEspera({
     <div style={estilos.coluna}>
       <div style={estilos.colunaHeader}>
         <div style={estilos.colunaTitulo}>Fila de Espera</div>
-        <span style={estilos.colunaBadge}>
-          {linhas.length} {linhas.length === 1 ? "OP" : "OPs"}
-        </span>
+        <div style={estilos.colunaStats}>
+          <span style={estilos.colunaBadge}>
+            {linhas.length} {linhas.length === 1 ? "OP" : "OPs"}
+          </span>
+          <span style={estilos.colunaBadge}>{totalPecas.toLocaleString("pt-BR")} pç</span>
+        </div>
       </div>
       <div style={estilos.colunaCorpo}>
         {linhas.length === 0 ? (
@@ -788,6 +877,7 @@ function CardConcluido({
       <div style={estilos.cardProduto}>{p.produto}</div>
       <div style={estilos.cardOficina}>
         Célula: <strong>{p.celula}</strong>
+        {p.tipo_peca.length > 0 && ` · ${p.tipo_peca.map((t) => TIPOS_PECA.find((tp) => tp.valor === t)?.label ?? t).join(", ")}`}
       </div>
       {p.data_conclusao && <span style={estilos.badgeVerde}>Concluído {formataDataHora(p.data_conclusao)}</span>}
       <button
@@ -1085,6 +1175,45 @@ const estilos: Record<string, React.CSSProperties> = {
     flexWrap: "wrap",
     gap: 12,
   },
+  buscaWrapper: {
+    position: "relative",
+    flex: "1 1 320px",
+    maxWidth: 420,
+    marginTop: 14,
+  },
+  buscaIcone: {
+    position: "absolute",
+    left: 12,
+    top: "50%",
+    transform: "translateY(-50%)",
+    color: "#8b8caf",
+    fontSize: 15,
+    pointerEvents: "none",
+  },
+  buscaInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    background: "rgba(255,255,255,0.08)",
+    border: "1px solid rgba(255,255,255,0.16)",
+    borderRadius: 8,
+    padding: "9px 32px 9px 34px",
+    fontSize: 13.5,
+    color: "#fff",
+    outline: "none",
+  },
+  buscaLimpar: {
+    position: "absolute",
+    right: 8,
+    top: "50%",
+    transform: "translateY(-50%)",
+    background: "transparent",
+    border: "none",
+    color: "#a5a6c9",
+    fontSize: 18,
+    cursor: "pointer",
+    lineHeight: 1,
+    padding: 4,
+  },
   titulo: { margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: -0.3 },
   subtitulo: { margin: "2px 0 0", fontSize: 13, color: "#a5a6c9", fontWeight: 500 },
   botao: {
@@ -1188,6 +1317,10 @@ const estilos: Record<string, React.CSSProperties> = {
     color: "#1f2937",
     textTransform: "uppercase",
     letterSpacing: 0.3,
+  },
+  colunaStats: {
+    display: "flex",
+    gap: 6,
   },
   colunaBadge: {
     background: "#fff",

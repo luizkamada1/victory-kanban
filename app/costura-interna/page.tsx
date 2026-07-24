@@ -72,7 +72,7 @@ function formataHoraFracionada(hora: number): string {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-const DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"];
+const DIAS_SEMANA = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
 
 export default function CosturaInternaPage() {
   const [ops, setOps] = useState<OP[]>([]);
@@ -148,6 +148,14 @@ export default function CosturaInternaPage() {
 
   const opsCosturaInterna = useMemo(() => ops.filter((op) => op.setor === SETOR), [ops]);
 
+  // OPs que ainda aparecem na Costura Interna segundo a última planilha — se
+  // uma produção já foi concluída aqui mas a OP dela ainda está nesse
+  // conjunto, a movimentação correspondente ainda não chegou no ERP.
+  const opNumerosAindaNoSetor = useMemo(
+    () => new Set(opsCosturaInterna.map((op) => op.op_numero)),
+    [opsCosturaInterna]
+  );
+
   const emAndamentoPorOp = useMemo(() => {
     const mapa: Record<string, number> = {};
     for (const p of producoes) {
@@ -192,11 +200,14 @@ export default function CosturaInternaPage() {
   );
   const producaoHojeTotal = concluidosHoje.reduce((acc, p) => acc + p.quantidade_concluida, 0);
   const ultimaAtualizacaoHoje = concluidosHoje.length > 0 ? concluidosHoje[0].data_conclusao : null;
+  // Mostra todas as células cadastradas (mesmo sem produção hoje), sempre na
+  // mesma ordem, pra dar pra ver de cara quais ainda não começaram a produzir.
   const producaoPorCelulaHoje = useMemo(() => {
     const mapa: Record<string, number> = {};
+    for (const nome of Object.keys(celulas)) mapa[nome] = 0;
     for (const p of concluidosHoje) mapa[p.celula] = (mapa[p.celula] ?? 0) + p.quantidade_concluida;
-    return Object.entries(mapa).sort((a, b) => b[1] - a[1]);
-  }, [concluidosHoje]);
+    return Object.entries(mapa).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [concluidosHoje, celulas]);
 
   // Curva de produção acumulada do dia (07h-19h) — degrau que sobe a cada
   // conclusão e fica horizontal quando não há produção registrada.
@@ -412,7 +423,12 @@ export default function CosturaInternaPage() {
                   <div style={estilos.colunaVazia}>Nenhuma conclusão ainda</div>
                 ) : (
                   concluidoRows.map((p) => (
-                    <CardConcluido key={p.id} p={p} onDesfazer={() => desfazerConcluir(p.id)} />
+                    <CardConcluido
+                      key={p.id}
+                      p={p}
+                      pendente={opNumerosAindaNoSetor.has(p.op_numero)}
+                      onDesfazer={() => desfazerConcluir(p.id)}
+                    />
                   ))
                 )}
               </ColunaSimples>
@@ -704,11 +720,30 @@ function CardEmAndamento({
   );
 }
 
-function CardConcluido({ p, onDesfazer }: { p: ProducaoCelula; onDesfazer: () => void }) {
+function CardConcluido({
+  p,
+  pendente,
+  onDesfazer,
+}: {
+  p: ProducaoCelula;
+  pendente: boolean;
+  onDesfazer: () => void;
+}) {
   return (
     <div style={estilos.card}>
       <div style={estilos.cardTopo}>
-        <span style={estilos.cardOp}>OP {p.op_numero}</span>
+        <span style={estilos.cardOp}>
+          OP {p.op_numero}
+          {pendente && (
+            <span
+              style={estilos.iconePendencia}
+              title="Movimentação pendente: esta produção foi concluída nesta tela, mas ainda não foi movimentada no sistema. Realize a movimentação para eliminar a divergência."
+            >
+              {" "}
+              ⚠️
+            </span>
+          )}
+        </span>
         <span style={estilos.cardQtde}>{p.quantidade_concluida.toLocaleString("pt-BR")} pç</span>
       </div>
       <div style={estilos.cardCodigo}>{p.codigo}</div>
@@ -1055,7 +1090,8 @@ const estilos: Record<string, React.CSSProperties> = {
   quadro: {
     display: "flex",
     gap: 14,
-    flex: 1,
+    flex: "3 1 0%",
+    minWidth: 0,
     minHeight: 0,
     overflowX: "auto",
     overflowY: "hidden",
@@ -1066,8 +1102,8 @@ const estilos: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: 14,
-    flexShrink: 0,
-    width: "clamp(320px, 26vw, 420px)",
+    flex: "2 1 0%",
+    minWidth: 340,
     paddingBottom: 12,
   },
   graficoCard: {
@@ -1182,6 +1218,10 @@ const estilos: Record<string, React.CSSProperties> = {
     borderRadius: 999,
     background: "#dcfce7",
     color: "#166534",
+  },
+  iconePendencia: {
+    cursor: "help",
+    fontSize: 12,
   },
   botaoPlay: {
     marginTop: 8,

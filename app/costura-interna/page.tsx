@@ -84,6 +84,7 @@ export default function CosturaInternaPage() {
   const [modalIniciarOp, setModalIniciarOp] = useState<OP | null>(null);
   const [modalConcluirRow, setModalConcluirRow] = useState<ProducaoCelula | null>(null);
   const [modalCapacidadeAberto, setModalCapacidadeAberto] = useState(false);
+  const [idsEmProcessamento, setIdsEmProcessamento] = useState<Set<number>>(new Set());
   const { recolhido, alternar } = useHeaderRecolhido();
 
   const carregarOps = useCallback(async () => {
@@ -269,6 +270,7 @@ export default function CosturaInternaPage() {
   }
 
   async function confirmarIniciar(op: OP, celula: string, tipoPeca: string[], quantidade: number) {
+    setErro(null);
     try {
       const resp = await fetch("/api/producao-celula", {
         method: "POST",
@@ -291,50 +293,75 @@ export default function CosturaInternaPage() {
     }
   }
 
-  async function confirmarConcluir(id: number, quantidade: number) {
+  // Evita que um duplo clique (ou um clique antes da lista atualizar) envie a
+  // mesma ação duas vezes pro mesmo registro — a segunda tentativa chegaria
+  // depois que a primeira já mudou o status, e falharia com uma mensagem
+  // confusa ("já foi concluída" / "ainda não foi concluída").
+  async function executarAcaoUnica(id: number, acao: () => Promise<void>) {
+    if (idsEmProcessamento.has(id)) return;
+    setIdsEmProcessamento((atual) => new Set(atual).add(id));
+    setErro(null);
     try {
-      const resp = await fetch("/api/producao-celula", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, acao: "concluir", quantidade }),
+      await acao();
+    } finally {
+      setIdsEmProcessamento((atual) => {
+        const copia = new Set(atual);
+        copia.delete(id);
+        return copia;
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Erro ao concluir");
-      setModalConcluirRow(null);
-      carregarProducoes();
-    } catch (e: unknown) {
-      setErro(e instanceof Error ? e.message : "Erro desconhecido");
     }
+  }
+
+  async function confirmarConcluir(id: number, quantidade: number) {
+    await executarAcaoUnica(id, async () => {
+      try {
+        const resp = await fetch("/api/producao-celula", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, acao: "concluir", quantidade }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao concluir");
+        setModalConcluirRow(null);
+        carregarProducoes();
+      } catch (e: unknown) {
+        setErro(e instanceof Error ? e.message : "Erro desconhecido");
+      }
+    });
   }
 
   async function desfazerIniciar(id: number) {
-    try {
-      const resp = await fetch("/api/producao-celula", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
-      carregarProducoes();
-    } catch (e: unknown) {
-      setErro(e instanceof Error ? e.message : "Erro desconhecido");
-    }
+    await executarAcaoUnica(id, async () => {
+      try {
+        const resp = await fetch("/api/producao-celula", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
+        carregarProducoes();
+      } catch (e: unknown) {
+        setErro(e instanceof Error ? e.message : "Erro desconhecido");
+      }
+    });
   }
 
   async function desfazerConcluir(id: number) {
-    try {
-      const resp = await fetch("/api/producao-celula", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, acao: "desfazer" }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
-      carregarProducoes();
-    } catch (e: unknown) {
-      setErro(e instanceof Error ? e.message : "Erro desconhecido");
-    }
+    await executarAcaoUnica(id, async () => {
+      try {
+        const resp = await fetch("/api/producao-celula", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, acao: "desfazer" }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Erro ao desfazer");
+        carregarProducoes();
+      } catch (e: unknown) {
+        setErro(e instanceof Error ? e.message : "Erro desconhecido");
+      }
+    });
   }
 
   return (
@@ -412,6 +439,7 @@ export default function CosturaInternaPage() {
                     <CardEmAndamento
                       key={p.id}
                       p={p}
+                      desabilitado={idsEmProcessamento.has(p.id)}
                       onConcluir={() => setModalConcluirRow(p)}
                       onDesfazer={() => desfazerIniciar(p.id)}
                     />
@@ -427,6 +455,7 @@ export default function CosturaInternaPage() {
                       key={p.id}
                       p={p}
                       pendente={opNumerosAindaNoSetor.has(p.op_numero)}
+                      desabilitado={idsEmProcessamento.has(p.id)}
                       onDesfazer={() => desfazerConcluir(p.id)}
                     />
                   ))
@@ -687,10 +716,12 @@ const CardFilaEspera = forwardRef<HTMLDivElement, CardFilaEsperaProps>(function 
 
 function CardEmAndamento({
   p,
+  desabilitado,
   onConcluir,
   onDesfazer,
 }: {
   p: ProducaoCelula;
+  desabilitado?: boolean;
   onConcluir: () => void;
   onDesfazer: () => void;
 }) {
@@ -710,10 +741,15 @@ function CardEmAndamento({
         <span style={estilos.badgeCinza}>Iniciado {formataDataHora(p.data_inicio)}</span>
         {p.previsao_alvo && <span style={estilos.badgeAzul}>🎯 {formataPrevisao(new Date(p.previsao_alvo))}</span>}
       </div>
-      <button onClick={onConcluir} style={estilos.botaoConcluir}>
+      <button onClick={onConcluir} disabled={desabilitado} style={estilos.botaoConcluir}>
         ✓ Concluir
       </button>
-      <button onClick={onDesfazer} style={estilos.botaoDesfazer} title="Desfazer o início desta produção">
+      <button
+        onClick={onDesfazer}
+        disabled={desabilitado}
+        style={estilos.botaoDesfazer}
+        title="Desfazer o início desta produção"
+      >
         desfazer início
       </button>
     </div>
@@ -723,10 +759,12 @@ function CardEmAndamento({
 function CardConcluido({
   p,
   pendente,
+  desabilitado,
   onDesfazer,
 }: {
   p: ProducaoCelula;
   pendente: boolean;
+  desabilitado?: boolean;
   onDesfazer: () => void;
 }) {
   return (
@@ -752,7 +790,12 @@ function CardConcluido({
         Célula: <strong>{p.celula}</strong>
       </div>
       {p.data_conclusao && <span style={estilos.badgeVerde}>Concluído {formataDataHora(p.data_conclusao)}</span>}
-      <button onClick={onDesfazer} style={estilos.botaoDesfazer} title="Desfazer a conclusão desta produção">
+      <button
+        onClick={onDesfazer}
+        disabled={desabilitado}
+        style={estilos.botaoDesfazer}
+        title="Desfazer a conclusão desta produção"
+      >
         desfazer conclusão
       </button>
     </div>

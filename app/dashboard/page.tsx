@@ -43,6 +43,22 @@ function formataDataCurta(iso: string): string {
   return `${dia}/${mes}`;
 }
 
+// Todas as datas do período (YYYY-MM-DD), incluindo dias sem nenhuma
+// transição registrada (fim de semana, feriado ou upload não enviado nesse
+// dia) — sem isso o eixo X do gráfico de evolução diária pula esses dias
+// (o eixo é categórico, não numérico), fazendo dias distantes aparecerem
+// coladas um no outro como se fossem consecutivos.
+function gerarDatasNoPeriodo(inicio: string, fim: string): string[] {
+  const datas: string[] = [];
+  const cursor = new Date(`${inicio}T00:00:00`);
+  const dataFim = new Date(`${fim}T00:00:00`);
+  while (cursor <= dataFim) {
+    datas.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return datas;
+}
+
 // Ordem oficial do fluxo de produção pros gráficos que comparam setores.
 const ORDEM_SETORES_GRAFICO = [
   "CORTE",
@@ -226,7 +242,7 @@ export default function DashboardPage() {
   const [producaoDiariaSetor, setProducaoDiariaSetor] = useState<Record<string, string | number>[]>(
     []
   );
-  const [setoresComDadosDiaria, setSetoresComDadosDiaria] = useState<string[]>([]);
+  const [setoresOrdenadosDiaria, setSetoresOrdenadosDiaria] = useState<string[]>([]);
   const [carregandoProducaoDiaria, setCarregandoProducaoDiaria] = useState(false);
   const [erroProducaoDiaria, setErroProducaoDiaria] = useState<string | null>(null);
 
@@ -376,7 +392,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (setoresEvolucaoDiaria.size === 0) {
       setProducaoDiariaSetor([]);
-      setSetoresComDadosDiaria([]);
+      setSetoresOrdenadosDiaria([]);
       return;
     }
     (async () => {
@@ -392,23 +408,28 @@ export default function DashboardPage() {
         const data = await resp.json();
         if (!resp.ok) throw new Error(data.error || "Erro ao carregar evolução dos setores");
         const pontos: { data: string; setor: string; pecas: number }[] = data.pontos || [];
+        const pecasPorDataSetor = new Map(pontos.map((p) => [`${p.data}::${p.setor}`, p.pecas]));
 
-        const datas = Array.from(new Set(pontos.map((p) => p.data))).sort();
+        // Todas as datas do período (não só as que tiveram transição) e todos
+        // os setores selecionados (não só os que produziram algo) — assim o
+        // eixo X fica com espaçamento correto entre os dias, e um setor sem
+        // nenhuma produção no período aparece como uma linha reta em 0 em vez
+        // de simplesmente não aparecer.
+        const datas = gerarDatasNoPeriodo(evolucaoInicio, evolucaoFim);
         const setoresPresentes = ordenarPorSetor(
-          Array.from(new Set(pontos.map((p) => p.setor))).map((setor) => ({ setor }))
+          Array.from(setoresEvolucaoDiaria).map((setor) => ({ setor }))
         ).map((s) => s.setor);
 
         const linhas = datas.map((data) => {
           const linha: Record<string, string | number> = { data: formataDataCurta(data) };
           for (const setor of setoresPresentes) {
-            const encontrado = pontos.find((p) => p.data === data && p.setor === setor);
-            linha[setor] = encontrado?.pecas ?? 0;
+            linha[setor] = pecasPorDataSetor.get(`${data}::${setor}`) ?? 0;
           }
           return linha;
         });
 
         setProducaoDiariaSetor(linhas);
-        setSetoresComDadosDiaria(setoresPresentes);
+        setSetoresOrdenadosDiaria(setoresPresentes);
       } catch (e: unknown) {
         setErroProducaoDiaria(e instanceof Error ? e.message : "Erro desconhecido");
       } finally {
@@ -948,7 +969,7 @@ export default function DashboardPage() {
                     <YAxis fontSize={11} />
                     <Tooltip formatter={(v) => `${Number(v).toLocaleString("pt-BR")} pç`} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
-                    {setoresComDadosDiaria.map((setor) => (
+                    {setoresOrdenadosDiaria.map((setor) => (
                       <Line
                         key={setor}
                         type="monotone"
